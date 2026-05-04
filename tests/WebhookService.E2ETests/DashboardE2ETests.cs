@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Json;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
 namespace WebhookService.E2ETests;
@@ -46,7 +47,7 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         return (body.GetProperty("id").GetString()!, body.GetProperty("webhookUrl").GetString()!);
     }
 
-    // ─── Dashboard page ───────────────────────────────────────────────────────
+    // --- Dashboard page ---
 
     [Fact]
     public async Task Dashboard_LoadsWithWebhookHeading()
@@ -86,21 +87,20 @@ public sealed class DashboardE2ETests : IAsyncLifetime
     [Fact]
     public async Task Dashboard_CardClick_NavigatesToTokenDetailPage()
     {
+        // Pre-create a token so a card is guaranteed to exist
+        var (tokenId, _) = await CreateTokenViaApiAsync("nav-test");
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
-
-        await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
-        await page.WaitForSelectorAsync("mat-dialog-container");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
         await page.WaitForSelectorAsync("mat-card");
 
-        await page.ClickAsync("mat-card-content");
-        await page.WaitForURLAsync($"**{BaseUrl}/tokens/**");
+        // Force=true bypasses Playwright hit-testing that would land on an overlapping icon button
+        await page.Locator("mat-card").First.ClickAsync(new LocatorClickOptions { Force = true });
 
-        Assert.Contains("/tokens/", page.Url);
+        // ToHaveURLAsync polls until the Angular SPA navigation commits (no page-load event needed)
+        await Assertions.Expect(page).ToHaveURLAsync(new Regex("/tokens/"));
     }
 
-    // ─── Token detail page ────────────────────────────────────────────────────
+    // --- Token detail page ---
 
     [Fact]
     public async Task TokenDetail_ShowsWebhookUrl()
@@ -119,15 +119,16 @@ public sealed class DashboardE2ETests : IAsyncLifetime
     {
         var (tokenId, webhookUrl) = await CreateTokenViaApiAsync("incoming-request-test");
 
+        // Send webhook before navigating so it is already in DB when page loads
         var content = new StringContent("{\"event\":\"e2e\"}", Encoding.UTF8, "application/json");
         await _apiClient.PostAsync(new Uri(webhookUrl).PathAndQuery, content);
 
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        await page.WaitForSelectorAsync("table tbody tr, .request-item", new() { Timeout = 10_000 });
-        var rows = await page.QuerySelectorAllAsync("table tbody tr, .request-item");
+        // Request rows render with class .request-row (not table rows)
+        await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+        var rows = await page.QuerySelectorAllAsync(".request-row");
         Assert.NotEmpty(rows);
     }
 
@@ -139,16 +140,15 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        var deleteButton = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex("delete", System.Text.RegularExpressions.RegexOptions.IgnoreCase) });
-        if (await deleteButton.CountAsync() > 0)
-        {
-            await deleteButton.First.ClickAsync();
-            await page.WaitForURLAsync($"**{BaseUrl}/dashboard**", new() { Timeout = 10_000 });
-            Assert.Contains("/dashboard", page.Url);
-        }
-        else
-        {
-            return; // skip: delete button pattern differs
-        }
+        // Wire up dialog handler BEFORE clicking — the app shows window.confirm() on delete
+        page.Dialog += async (_, dialog) => await dialog.AcceptAsync();
+
+        var deleteButton = page.GetByRole(AriaRole.Button,
+            new() { NameRegex = new Regex("delete.*url", RegexOptions.IgnoreCase) });
+        await deleteButton.ClickAsync();
+
+        // Poll until the Angular router navigates back to the dashboard
+        await Assertions.Expect(page).ToHaveURLAsync(new Regex("/dashboard"),
+            new PageAssertionsToHaveURLOptions { Timeout = 10_000 });
     }
 }
