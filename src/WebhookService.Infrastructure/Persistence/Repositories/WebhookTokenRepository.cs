@@ -31,7 +31,13 @@ internal sealed class WebhookTokenRepository : IWebhookTokenRepository
 
     public async Task UpdateAsync(WebhookToken token, CancellationToken ct = default)
     {
-        _db.WebhookTokens.Update(token);
+        var tracked = await _db.WebhookTokens.FindAsync([token.Id], ct);
+        if (tracked is null) return;
+
+        tracked.Description = token.Description;
+        tracked.IsActive = token.IsActive;
+        tracked.CustomResponse = token.CustomResponse;
+
         await _db.SaveChangesAsync(ct);
     }
 }

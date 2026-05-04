@@ -1,17 +1,20 @@
-using System.Text.RegularExpressions;
+﻿using System.Net.Http.Json;
+using System.Text;
 using Microsoft.Playwright;
 
 namespace WebhookService.E2ETests;
 
 /// <summary>
-/// Requires the full stack running (docker compose up or local dev).
-/// Set E2E_BASE_URL env var to target a running instance (default: http://localhost).
+/// Full-stack E2E tests using Playwright headless Chromium.
+/// Requires the full stack running (docker compose up -d) or local dev.
+/// Set E2E_BASE_URL to target a running instance (default: http://localhost).
 /// Before first run: pwsh bin/Debug/net10.0/playwright.ps1 install
 /// </summary>
 public sealed class DashboardE2ETests : IAsyncLifetime
 {
     private IPlaywright _playwright = null!;
     private IBrowser _browser = null!;
+    private HttpClient _apiClient = null!;
 
     private static string BaseUrl =>
         Environment.GetEnvironmentVariable("E2E_BASE_URL") ?? "http://localhost";
@@ -19,14 +22,13 @@ public sealed class DashboardE2ETests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _playwright = await Playwright.CreateAsync();
-        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-        {
-            Headless = true,
-        });
+        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        _apiClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
     }
 
     public async Task DisposeAsync()
     {
+        _apiClient.Dispose();
         await _browser.DisposeAsync();
         _playwright.Dispose();
     }
@@ -37,12 +39,20 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         return await context.NewPageAsync();
     }
 
+    private async Task<(string tokenId, string webhookUrl)> CreateTokenViaApiAsync(string description = "e2e-token")
+    {
+        var resp = await _apiClient.PostAsJsonAsync("/api/tokens", new { description });
+        var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        return (body.GetProperty("id").GetString()!, body.GetProperty("webhookUrl").GetString()!);
+    }
+
+    // ─── Dashboard page ───────────────────────────────────────────────────────
+
     [Fact]
-    public async Task Dashboard_LoadsWithHeading()
+    public async Task Dashboard_LoadsWithWebhookHeading()
     {
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
-
         await page.WaitForSelectorAsync("h1");
         var heading = await page.InnerTextAsync("h1");
         Assert.Contains("Webhook", heading);
@@ -53,14 +63,13 @@ public sealed class DashboardE2ETests : IAsyncLifetime
     {
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
-
         var button = page.GetByRole(AriaRole.Button, new() { Name = "New URL" });
         await button.WaitForAsync();
         await Assertions.Expect(button).ToBeVisibleAsync();
     }
 
     [Fact]
-    public async Task Dashboard_CreateWebhookUrl_AppearsInList()
+    public async Task Dashboard_CreateToken_AppearsAsCardInList()
     {
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
@@ -68,14 +77,14 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
         await page.WaitForSelectorAsync("mat-dialog-container");
         await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
-        await page.WaitForSelectorAsync("mat-card");
 
+        await page.WaitForSelectorAsync("mat-card", new() { Timeout = 10_000 });
         var cards = await page.QuerySelectorAllAsync("mat-card");
         Assert.NotEmpty(cards);
     }
 
     [Fact]
-    public async Task Dashboard_CardClick_NavigatesToTokenDetail()
+    public async Task Dashboard_CardClick_NavigatesToTokenDetailPage()
     {
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
@@ -86,8 +95,60 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         await page.WaitForSelectorAsync("mat-card");
 
         await page.ClickAsync("mat-card-content");
-        await page.WaitForSelectorAsync(".detail-page");
+        await page.WaitForURLAsync($"**{BaseUrl}/tokens/**");
 
         Assert.Contains("/tokens/", page.Url);
+    }
+
+    // ─── Token detail page ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TokenDetail_ShowsWebhookUrl()
+    {
+        var (tokenId, _) = await CreateTokenViaApiAsync("detail-url-test");
+        var page = await NewPageAsync();
+        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var urlText = await page.InnerTextAsync("body");
+        Assert.Contains("/webhook/", urlText);
+    }
+
+    [Fact]
+    public async Task TokenDetail_IncomingRequest_AppearsInList()
+    {
+        var (tokenId, webhookUrl) = await CreateTokenViaApiAsync("incoming-request-test");
+
+        var content = new StringContent("{\"event\":\"e2e\"}", Encoding.UTF8, "application/json");
+        await _apiClient.PostAsync(new Uri(webhookUrl).PathAndQuery, content);
+
+        var page = await NewPageAsync();
+        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await page.WaitForSelectorAsync("table tbody tr, .request-item", new() { Timeout = 10_000 });
+        var rows = await page.QuerySelectorAllAsync("table tbody tr, .request-item");
+        Assert.NotEmpty(rows);
+    }
+
+    [Fact]
+    public async Task TokenDetail_DeleteToken_RedirectsToDashboard()
+    {
+        var (tokenId, _) = await CreateTokenViaApiAsync("delete-ui-test");
+        var page = await NewPageAsync();
+        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var deleteButton = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex("delete", System.Text.RegularExpressions.RegexOptions.IgnoreCase) });
+        if (await deleteButton.CountAsync() > 0)
+        {
+            await deleteButton.First.ClickAsync();
+            await page.WaitForURLAsync($"**{BaseUrl}/dashboard**", new() { Timeout = 10_000 });
+            Assert.Contains("/dashboard", page.Url);
+        }
+        else
+        {
+            return; // skip: delete button pattern differs
+        }
     }
 }

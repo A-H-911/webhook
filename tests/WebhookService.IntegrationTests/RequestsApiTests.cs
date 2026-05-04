@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -25,7 +25,7 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
     private async Task SendWebhookAsync(string webhookToken, string body = "{}")
     {
         var content = new StringContent(body, Encoding.UTF8, "application/json");
-        await _client.PostAsync($"/hooks/{webhookToken}", content);
+        await _client.PostAsync($"/webhook/{webhookToken}", content);
     }
 
     [Fact]
@@ -91,5 +91,55 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
         var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
         var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         list.GetProperty("total").GetInt32().Should().Be(0);
+    }
+    [Fact]
+    public async Task GetRequestById_WithWrongToken_Returns404_PreventingIdor()
+    {
+        // Token A receives a webhook — we capture its request id
+        var (tokenAId, webhookTokenA) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookTokenA, "{\"secret\":true}");
+
+        var listA = await (await _client.GetAsync($"/api/tokens/{tokenAId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = listA.GetProperty("items")[0].GetProperty("id").GetString();
+
+        // Token B tries to access token A''s request — must be blocked (IDOR)
+        var (tokenBId, _) = await CreateTokenAsync();
+        var response = await _client.GetAsync($"/api/tokens/{tokenBId}/requests/{requestId}");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task ExportRequest_Returns200_WithJsonContent()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken, "{\"export\":true}");
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var exportResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests/{requestId}/export");
+        exportResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await exportResponse.Content.ReadAsStringAsync();
+        content.Should().Contain("Method");
+        content.Should().Contain("Path");
+    }
+
+    [Fact]
+    public async Task GetRequests_SecondPage_ReturnsCorrectSubset()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken, "{\"n\":1}");
+        await SendWebhookAsync(webhookToken, "{\"n\":2}");
+        await SendWebhookAsync(webhookToken, "{\"n\":3}");
+
+        var response = await _client.GetAsync($"/api/tokens/{tokenId}/requests?page=2&pageSize=2");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        result.GetProperty("total").GetInt32().Should().BeGreaterThanOrEqualTo(3);
+        result.GetProperty("items").GetArrayLength().Should().BeGreaterThanOrEqualTo(1);
     }
 }

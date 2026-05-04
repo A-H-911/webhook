@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -88,5 +88,64 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
         var getResponse = await _client.GetAsync($"/api/tokens/{id}");
         var updated = await getResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         updated.GetProperty("customResponse").ValueKind.Should().NotBe(JsonValueKind.Null);
+    }
+    [Fact]
+    public async Task UpdateToken_Returns200_AndPersistsChange()
+    {
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "update-test" });
+        var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var id = token.GetProperty("id").GetString();
+
+        var updateResponse = await _client.PutAsJsonAsync($"/api/tokens/{id}",
+            new { description = "updated-description", isActive = true });
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var getResponse = await _client.GetAsync($"/api/tokens/{id}");
+        var updated = await getResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        updated.GetProperty("description").GetString().Should().Be("updated-description");
+    }
+
+    [Fact]
+    public async Task ResetCustomResponse_Returns204_AndClearsIt()
+    {
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "reset-cr" });
+        var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var id = token.GetProperty("id").GetString();
+
+        await _client.PutAsJsonAsync($"/api/tokens/{id}/custom-response",
+            new { statusCode = 201, contentType = "application/json", body = "{}", headers = "{}" });
+
+        var resetResponse = await _client.DeleteAsync($"/api/tokens/{id}/custom-response");
+        resetResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var getResponse = await _client.GetAsync($"/api/tokens/{id}");
+        var updated = await getResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        updated.GetProperty("customResponse").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task SetCustomResponse_WithInvalidStatusCode_Returns422()
+    {
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "val-test" });
+        var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var id = token.GetProperty("id").GetString();
+
+        var response = await _client.PutAsJsonAsync($"/api/tokens/{id}/custom-response",
+            new { statusCode = 99, contentType = "text/plain", body = (string?)null, headers = "{}" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task SetCustomResponse_WithInvalidHeadersJson_Returns422()
+    {
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "val-headers" });
+        var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var id = token.GetProperty("id").GetString();
+
+        var response = await _client.PutAsJsonAsync($"/api/tokens/{id}/custom-response",
+            new { statusCode = 200, contentType = "text/plain", body = (string?)null, headers = "not-json" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
     }
 }

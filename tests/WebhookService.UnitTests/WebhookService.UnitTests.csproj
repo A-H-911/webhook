@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\WebhookService.Domain\WebhookService.Domain.csproj" />
     <ProjectReference Include="..\..\src\WebhookService.Application\WebhookService.Application.csproj" />
     <ProjectReference Include="..\..\src\WebhookService.Infrastructure\WebhookService.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\WebhookService.API\WebhookService.API.csproj" />
   </ItemGroup>
 
 </Project>
