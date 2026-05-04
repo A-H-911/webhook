@@ -53,7 +53,10 @@ npm test
 # Install browsers (first run only)
 pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
-# Run E2E tests against running stack
+# Run E2E tests against running stack (set E2E_BASE_URL to match frontend port)
+E2E_BASE_URL=http://localhost:8088 dotnet test tests/WebhookService.E2ETests/
+
+# Or if frontend is running on port 80 (with override setup)
 E2E_BASE_URL=http://localhost dotnet test tests/WebhookService.E2ETests/
 ```
 
@@ -119,8 +122,8 @@ docker/
 | Service | Image | Port |
 |---------|-------|------|
 | `api` | Built from `src/WebhookService.API/Dockerfile` | 8080 |
-| `frontend` | Built from `docker/frontend/Dockerfile` | 80 |
+| `frontend` | Built from `docker/frontend/Dockerfile` | 8088 |
 | `sqlserver` | Built from `docker/sqlserver/Dockerfile` | 1433 |
-| `seq` | `datalust/seq:latest` | 5341 (ingest), 8081 (UI) |
+| `seq` | `datalust/seq:latest` | 5341 (ingest), 5342 (UI) |
 
-Nginx at port 80 reverse-proxies `/api/`, `/webhook/`, and `/health` to the API container and serves the Angular SPA for all other paths with `try_files $uri $uri/ /index.html`. SSE routes (`~ ^/api/tokens/[^/]+/sse$`) have `proxy_buffering off` and `proxy_read_timeout 3600s`.
+Nginx at port 8088 (mapped from internal 80) reverse-proxies `/api/`, `/webhook/`, and `/health` to the API container and serves the Angular SPA for all other paths with `try_files $uri $uri/ /index.html`. SSE routes (`~ ^/api/tokens/[^/]+/sse$`) have `proxy_buffering off` and `proxy_read_timeout 3600s`. SEQ UI is accessible at `http://localhost:5342`.
