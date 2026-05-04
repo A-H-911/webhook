@@ -67,7 +67,7 @@ public sealed class DashboardE2ETests : IAsyncLifetime
 
         await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
         await page.WaitForSelectorAsync("mat-dialog-container");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
         await page.WaitForSelectorAsync("mat-card");
 
         var cards = await page.QuerySelectorAllAsync("mat-card");
@@ -82,11 +82,11 @@ public sealed class DashboardE2ETests : IAsyncLifetime
 
         await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
         await page.WaitForSelectorAsync("mat-dialog-container");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
         await page.WaitForSelectorAsync("mat-card");
 
-        await page.ClickAsync("mat-card");
-        await page.WaitForURLAsync(new Regex("/tokens/"));
+        await page.ClickAsync("mat-card-content");
+        await page.WaitForSelectorAsync(".detail-page");
 
         Assert.Contains("/tokens/", page.Url);
     }

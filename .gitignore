@@ -1,0 +1,33 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# .NET
+*.user
+*.suo
+.vs/
+*.nupkg
+
+# Angular / Node
+**/node_modules/
+frontend/webhook-spa/dist/
+frontend/webhook-spa/.angular/
+
+# Environment / secrets
+.env
+*.env.local
+
+# Playwright browser downloads
+**/playwright/.local-browsers/
+**/.playwright/
+
+# Rider / JetBrains
+.idea/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
