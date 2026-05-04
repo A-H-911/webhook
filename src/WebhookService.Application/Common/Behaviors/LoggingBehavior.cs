@@ -19,11 +19,14 @@ public sealed class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
         var sw = Stopwatch.StartNew();
         try
         {
-            return await next(ct);
+            var response = await next(ct);
+            _logger.LogInformation("{Handler} succeeded in {ElapsedMs}ms", name, sw.ElapsedMilliseconds);
+            return response;
         }
-        finally
+        catch (Exception ex)
         {
-            _logger.LogInformation("{Handler} completed in {ElapsedMs}ms", name, sw.ElapsedMilliseconds);
+            _logger.LogError(ex, "{Handler} failed after {ElapsedMs}ms", name, sw.ElapsedMilliseconds);
+            throw;
         }
     }
 }

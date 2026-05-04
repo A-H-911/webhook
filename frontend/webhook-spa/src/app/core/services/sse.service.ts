@@ -9,8 +9,8 @@ export type SseEvent =
 @Injectable({ providedIn: 'root' })
 export class SseService {
   connect(tokenId: string): Observable<SseEvent> {
-    return new Observable<SseEvent>(subscriber => {
-      const es = new EventSource(`/api/events/${tokenId}`);
+    return new Observable<SseEvent>((subscriber) => {
+      const es = new EventSource(`/api/tokens/${tokenId}/sse`);
 
       es.addEventListener('new-request', (e: MessageEvent) => {
         try {

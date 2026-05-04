@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 using Polly;
 using Serilog;
 using WebhookService.API.Middleware;
-using WebhookService.API.Options;
+using WebhookService.Application.Options;
 using WebhookService.Application;
 using WebhookService.Infrastructure;
 using WebhookService.Infrastructure.Persistence;
@@ -77,7 +77,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 
 // EF migration with retry — SQL Server container may not be ready immediately
 await Policy
-    .Handle<Exception>()
+    .Handle<Exception>(ex => ex is not OperationCanceledException)
     .WaitAndRetryAsync(5, attempt => TimeSpan.FromSeconds(attempt * 2))
     .ExecuteAsync(async () =>
     {

@@ -1,6 +1,6 @@
 namespace WebhookService.Domain.ValueObjects;
 
-public sealed class CustomResponse
+public sealed record CustomResponse
 {
     public int StatusCode { get; init; } = 200;
     public string ContentType { get; init; } = "text/plain";

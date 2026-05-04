@@ -1,14 +1,15 @@
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using WebhookService.Application.Options;
 using WebhookService.Domain.Repositories;
 
 namespace WebhookService.Infrastructure.BackgroundServices;
 
 public sealed class RetentionCleanupService(
     IServiceScopeFactory scopeFactory,
-    IConfiguration configuration,
+    IOptions<WebhookOptions> options,
     ILogger<RetentionCleanupService> logger)
     : BackgroundService
 {
@@ -20,7 +21,7 @@ public sealed class RetentionCleanupService(
         {
             try
             {
-                var retentionDays = configuration.GetValue<int>("Webhook:RetentionDays", 7);
+                var retentionDays = options.Value.RetentionDays;
                 if (retentionDays <= 0) continue;
 
                 await using var scope = scopeFactory.CreateAsyncScope();

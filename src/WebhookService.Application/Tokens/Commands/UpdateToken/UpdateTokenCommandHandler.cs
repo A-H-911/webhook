@@ -1,5 +1,7 @@
 using MediatR;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
+using WebhookService.Application.Options;
 using WebhookService.Application.Tokens.Queries.GetToken;
 using WebhookService.Domain.Repositories;
 
@@ -7,7 +9,8 @@ namespace WebhookService.Application.Tokens.Commands.UpdateToken;
 
 internal sealed class UpdateTokenCommandHandler(
     IWebhookTokenRepository repository,
-    IConfiguration configuration)
+    IOptions<WebhookOptions> options,
+    IMemoryCache cache)
     : IRequestHandler<UpdateTokenCommand, TokenDto?>
 {
     public async Task<TokenDto?> Handle(UpdateTokenCommand request, CancellationToken cancellationToken)
@@ -20,7 +23,7 @@ internal sealed class UpdateTokenCommandHandler(
         token.IsActive = request.IsActive;
 
         await repository.UpdateAsync(token, cancellationToken);
-        var baseUrl = configuration["Webhook:BaseUrl"] ?? string.Empty;
-        return token.ToDto(baseUrl);
+        cache.Remove($"token:{token.Token}");
+        return token.ToDto(options.Value.BaseUrl);
     }
 }

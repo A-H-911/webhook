@@ -90,19 +90,27 @@ docker/
 
 ## Key Non-Obvious Facts
 
-**URL routing split:** The webhook *receiver* endpoint is `POST /hooks/{guid}`. The `webhookUrl` field shown in the UI and stored in the DB is `{baseUrl}/webhook/{guid}` — integration test helpers extract the token by splitting on `/` and taking `Last()`.
+**URL routing:** The webhook *receiver* endpoint is `POST /webhook/{token:guid}`. The `webhookUrl` field shown in the UI and stored in the DB is `{baseUrl}/webhook/{guid}`.
 
-**SSE notifier is in-process:** `SseNotifier` uses `ConcurrentDictionary<Guid, List<Channel<SseEvent>>>` — no Redis, no message broker. Max 10 concurrent SSE connections per token. The SSE endpoint is `GET /api/tokens/{tokenId}/sse`.
+**SSE endpoint:** `GET /api/tokens/{tokenId}/sse` — not `/api/events/`. Max 10 concurrent SSE connections per token. SSE response begins with `retry: 5000\n\n` before the event loop.
 
-**Retention cleanup is a BackgroundService:** `RetentionCleanupService` runs on a 24-hour `PeriodicTimer` using `IServiceScopeFactory`. Hangfire is not used in this project.
+**Retention cleanup is a BackgroundService:** `RetentionCleanupService` runs on a 24-hour `PeriodicTimer` using `IServiceScopeFactory`. Hangfire is not used in this project. The service wraps all cleanup work in try/catch — DB errors are logged and do not stop the timer.
 
-**Integration tests need Docker:** `WebAppFactory` spins up a real `mcr.microsoft.com/mssql/server:2022-latest` container via Testcontainers. Docker must be running before `dotnet test` on that project.
+**Token cache:** Uses `GetOrCreateAsync` with 60-second sliding expiration. **Null results are not cached** — cache is explicitly removed if token is not found or inactive. Custom response updates (`SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`) all call `cache.Remove()`.
+
+**Repository reads:** `WebhookTokenRepository` and `WebhookRequestRepository` use `.AsNoTracking()` on all SELECT queries.
+
+**IDOR protection:** `GetRequestById`, `ExportRequest`, and `DeleteRequest` queries include `WHERE TokenId = @tokenId` to verify ownership before returning or modifying a request.
+
+**HTTP 422 validation:** `GlobalExceptionMiddleware` catches `FluentValidation.ValidationException` and returns HTTP 422 with a field/message error list (not 400).
+
+**Integration tests need Docker:** `WebApplicationFactory` spins up a real `mcr.microsoft.com/mssql/server:2022-latest` container via Testcontainers. Docker must be running before `dotnet test` on that project. Tests use a local `TestNullSseNotifier` stub for `ISseNotifier`.
 
 **Custom SQL Server Docker image:** `docker/sqlserver/Dockerfile` wraps the official image with an `entrypoint.sh` that polls until SQL Server is ready, then runs `init.sql` — necessary because the official image's `MSSQL_*` env vars don't work reliably for schema init.
 
 **Environment config:** Copy `.env.example` to `.env` before first `docker compose up`. Key variables: `SA_PASSWORD`, `WEBHOOK_BASE_URL` (used to generate webhook URLs), `RETENTION_DAYS`, `MAX_REQUEST_SIZE_MB`.
 
-**Angular dev proxy:** `proxy.conf.json` forwards `/api`, `/hooks`, `/health` to `http://localhost:8080`. The `ng serve` target at port 4200 uses this automatically via `angular.json`.
+**Angular dev proxy:** `proxy.conf.json` forwards `/api`, `/webhook`, `/health` to `http://localhost:8080`. The `ng serve` target at port 4200 uses this automatically via `angular.json`.
 
 **PowerShell encoding:** When editing files in PowerShell 5.1, always use `[System.IO.File]::ReadAllText/WriteAllText` with explicit `System.Text.Encoding.UTF8`. Never use bare `Get-Content`/`Set-Content` on UTF-8 files — they silently corrupt non-ASCII characters.
 
@@ -115,4 +123,4 @@ docker/
 | `sqlserver` | Built from `docker/sqlserver/Dockerfile` | 1433 |
 | `seq` | `datalust/seq:latest` | 5341 (ingest), 8081 (UI) |
 
-Nginx at port 80 reverse-proxies `/api/`, `/hooks/`, and `/health` to the API container and serves the Angular SPA for all other paths with `try_files $uri $uri/ /index.html`. SSE routes (`/api/tokens/*/sse`) have `proxy_buffering off` and `proxy_read_timeout 3600s`.
+Nginx at port 80 reverse-proxies `/api/`, `/webhook/`, and `/health` to the API container and serves the Angular SPA for all other paths with `try_files $uri $uri/ /index.html`. SSE routes (`~ ^/api/tokens/[^/]+/sse$`) have `proxy_buffering off` and `proxy_read_timeout 3600s`.

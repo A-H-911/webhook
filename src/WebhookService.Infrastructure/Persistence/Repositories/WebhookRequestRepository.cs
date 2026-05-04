@@ -11,12 +11,12 @@ internal sealed class WebhookRequestRepository : IWebhookRequestRepository
     public WebhookRequestRepository(ApplicationDbContext db) => _db = db;
 
     public Task<WebhookRequest?> GetByIdAsync(Guid id, CancellationToken ct = default)
-        => _db.WebhookRequests.FirstOrDefaultAsync(r => r.Id == id, ct);
+        => _db.WebhookRequests.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
 
     public async Task<(IReadOnlyList<WebhookRequest> Items, int Total)> GetPagedAsync(
         Guid tokenId, int page, int pageSize, string? search, CancellationToken ct = default)
     {
-        var query = _db.WebhookRequests.Where(r => r.TokenId == tokenId);
+        var query = _db.WebhookRequests.AsNoTracking().Where(r => r.TokenId == tokenId);
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(r =>

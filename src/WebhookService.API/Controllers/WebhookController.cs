@@ -19,7 +19,7 @@ public sealed class WebhookController(
     private static readonly MemoryCacheEntryOptions TokenCacheOptions =
         new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(5));
 
-    [Route("hooks/{token:guid}")]
+    [Route("webhook/{token:guid}")]
     [HttpGet, HttpPost, HttpPut, HttpPatch, HttpDelete, HttpHead, HttpOptions]
     public async Task<IActionResult> Receive(Guid token, CancellationToken ct)
     {

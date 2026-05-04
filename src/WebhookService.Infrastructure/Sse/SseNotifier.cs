@@ -14,7 +14,13 @@ internal sealed class SseNotifier : ISseNotifier
         Guid tokenId,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var channel = Channel.CreateUnbounded<SseEvent>();
+        var channel = Channel.CreateBounded<SseEvent>(
+            new BoundedChannelOptions(100)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
+            });
 
         lock (_lock)
         {
@@ -40,7 +46,7 @@ internal sealed class SseNotifier : ISseNotifier
         }
     }
 
-    public async Task NotifyAsync(Guid tokenId, string summaryJson)
+    public async Task NotifyAsync(Guid tokenId, string summaryJson, CancellationToken ct = default)
     {
         var evt = new SseEvent("request", summaryJson);
         List<Channel<SseEvent>> snapshot;
@@ -53,7 +59,7 @@ internal sealed class SseNotifier : ISseNotifier
         }
 
         foreach (var channel in snapshot)
-            await channel.Writer.WriteAsync(evt);
+            await channel.Writer.WriteAsync(evt, ct);
     }
 
     public void NotifyTokenDeleted(Guid tokenId)

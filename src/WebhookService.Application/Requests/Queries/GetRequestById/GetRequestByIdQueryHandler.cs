@@ -10,7 +10,8 @@ internal sealed class GetRequestByIdQueryHandler(IWebhookRequestRepository repos
     public async Task<WebhookRequestDetailDto?> Handle(GetRequestByIdQuery request, CancellationToken cancellationToken)
     {
         var r = await repository.GetByIdAsync(request.Id, cancellationToken);
-        return r is null ? null : ToDetail(r);
+        if (r is null || r.TokenId != request.TokenId) return null;
+        return ToDetail(r);
     }
 
     private static WebhookRequestDetailDto ToDetail(WebhookRequest r) => new(

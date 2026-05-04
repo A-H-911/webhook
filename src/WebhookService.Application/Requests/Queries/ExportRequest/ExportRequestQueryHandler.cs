@@ -13,7 +13,8 @@ internal sealed class ExportRequestQueryHandler(IWebhookRequestRepository reposi
     public async Task<byte[]?> Handle(ExportRequestQuery request, CancellationToken cancellationToken)
     {
         var r = await repository.GetByIdAsync(request.Id, cancellationToken);
-        return r is null ? null : JsonSerializer.SerializeToUtf8Bytes(ToExport(r), JsonOptions);
+        if (r is null || r.TokenId != request.TokenId) return null;
+        return JsonSerializer.SerializeToUtf8Bytes(ToExport(r), JsonOptions);
     }
 
     private static object ToExport(WebhookRequest r) => new

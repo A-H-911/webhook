@@ -1,4 +1,5 @@
 using MediatR;
+using Microsoft.Extensions.Caching.Memory;
 using WebhookService.Domain.Repositories;
 using WebhookService.Domain.Services;
 
@@ -6,7 +7,8 @@ namespace WebhookService.Application.Tokens.Commands.DeleteToken;
 
 internal sealed class DeleteTokenCommandHandler(
     IWebhookTokenRepository repository,
-    ISseNotifier sseNotifier)
+    ISseNotifier sseNotifier,
+    IMemoryCache cache)
     : IRequestHandler<DeleteTokenCommand, bool>
 {
     public async Task<bool> Handle(DeleteTokenCommand request, CancellationToken cancellationToken)
@@ -17,6 +19,7 @@ internal sealed class DeleteTokenCommandHandler(
 
         token.IsActive = false;
         await repository.UpdateAsync(token, cancellationToken);
+        cache.Remove($"token:{token.Token}");
         sseNotifier.NotifyTokenDeleted(token.Id);
         return true;
     }

@@ -14,6 +14,10 @@ public sealed class SseController(ISseNotifier sseNotifier) : ControllerBase
         Response.Headers.CacheControl = "no-cache";
         Response.Headers.Connection = "keep-alive";
 
+        var retryFrame = Encoding.UTF8.GetBytes("retry: 5000\n\n");
+        await Response.Body.WriteAsync(retryFrame, ct);
+        await Response.Body.FlushAsync(ct);
+
         await foreach (var evt in sseNotifier.SubscribeAsync(tokenId, ct))
         {
             var line = $"event: {evt.EventName}\ndata: {evt.Data}\n\n";

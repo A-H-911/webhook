@@ -14,6 +14,7 @@
 | v2 | 2026-05-04 | Devil's advocate review — 5 blocking flaws fixed, 5 high issues resolved, 8 medium addressed |
 | v3 | 2026-05-04 | Hangfire removed. 6→4 Docker services. SSE notify is direct in-process call. Retention uses BackgroundService. 12→11 phases. |
 | v4 | 2026-05-04 | Second devil's advocate review — 4 new blocking + 5 high + 8 medium issues found and fixed (IP forwarding, BackgroundService crash, NullSseNotifier, body reading, CORS, port config, Host header, SSE race, options validation) |
+| v5 | 2026-05-04 | Code review complete — 22 findings fixed (route corrections, IDOR fixes, cache eviction, AsNoTracking, validation 422, SSE retry frame, nginx.conf updates, Polly retry narrowing) |
 
 ---
 
@@ -175,9 +176,10 @@ POST /webhook/{uuid}
 ```
 User opens token detail page
   → GET /api/tokens/{uuid}/requests?page=1&pageSize=20   (SummaryDto[], no body)
-  → GET /api/events/{uuid}                                (SSE subscribe)
+  → GET /api/tokens/{uuid}/sse                             (SSE subscribe)
       Nginx: proxy_buffering off; proxy_read_timeout 3600s; chunked_transfer_encoding on
       API: connection count check (atomic) → 429 if >= 10
+      SSE response begins with "retry: 5000\n\n"
       keepalive: "comment: ping" every 15s via background timer
   → New request arrives → SSE event delivered immediately (in-process)
   → User clicks row → GET /api/tokens/{uuid}/requests/{reqId}  (DetailDto with body)
@@ -305,8 +307,8 @@ POST   /api/tokens                               → 201  WebhookTokenDto
 GET    /api/tokens                               → 200  WebhookTokenDto[]   (IsActive=true only)
 GET    /api/tokens/{uuid}                        → 200  WebhookTokenDto
 DELETE /api/tokens/{uuid}                        → 204
-PUT    /api/tokens/{uuid}/response               → 200  WebhookTokenDto
-DELETE /api/tokens/{uuid}/response               → 204  (reset to 200 OK defaults)
+PUT    /api/tokens/{uuid}/custom-response        → 200  WebhookTokenDto
+DELETE /api/tokens/{uuid}/custom-response        → 204  (reset to 200 OK defaults)
 
 # Request Management
 GET    /api/tokens/{uuid}/requests               → 200  PagedResult<WebhookRequestSummaryDto>
@@ -320,10 +322,10 @@ GET    /api/tokens/{uuid}/requests/{reqId}/export → 200  Content-Type: applica
                                                           Content-Disposition: attachment; filename="request-{id}.json"
 
 # Webhook Receiver (any HTTP method)
-ANY    /webhook/{uuid}                           → custom response or 200 OK
+ANY    /webhook/{token:guid}                     → custom response or 200 OK
 
 # SSE Stream
-GET    /api/events/{uuid}                        → 200  Content-Type: text/event-stream
+GET    /api/tokens/{tokenId}/sse                 → 200  Content-Type: text/event-stream
                                                          429 if >= 10 concurrent connections for this token
 
 # Health
@@ -334,6 +336,8 @@ GET    /health/ready                             → 200  if WebhookDb reachable
 **SSE event shapes:**
 
 ```
+retry: 5000                        (first line — tells EventSource to reconnect after 5s if disconnected)
+
 event: new-request
 data: {"id":"...","method":"POST","path":"/webhook/...","receivedAt":"...","sizeBytes":342,"ipAddress":"1.2.3.4"}
 
@@ -341,7 +345,6 @@ event: token-deleted
 data: {}
 
 comment: ping                      (every 15s keepalive — keeps Nginx proxy alive)
-retry: 3000                        (tells EventSource to reconnect after 3s)
 ```
 
 ### 3.4 SseEvent Record
@@ -405,18 +408,18 @@ internal sealed class NullSseNotifier : ISseNotifier
 - `GetTokenByIdQuery` / Handler — returns 404 if not found or `IsActive = 0`
 
 **Request Queries**
-- `GetRequestsQuery` — `PagedResult<WebhookRequestSummaryDto>`; LIKE search; `pageSize` ≤ 100 (two DB queries: COUNT + paged SELECT)
-- `GetRequestByIdQuery` — `WebhookRequestDetailDto`
-- `ExportRequestQuery` — serialises `WebhookRequestDetailDto` to JSON bytes; filename `request-{id}.json`
+- `GetRequestsQuery` — `PagedResult<WebhookRequestSummaryDto>`; LIKE search; `pageSize` ≤ 100 (two DB queries: COUNT + paged SELECT); **includes TokenId ownership check**
+- `GetRequestByIdQuery` — `WebhookRequestDetailDto`; **includes TokenId ownership check** to prevent IDOR
+- `ExportRequestQuery` — serialises `WebhookRequestDetailDto` to JSON bytes; filename `request-{id}.json`; **includes TokenId ownership check**
 
 **Pipeline Behaviors**
 - `LoggingBehavior` — command/query name + duration; **never logs payloads** (may contain secrets)
-- `ValidationBehavior` — FluentValidation before handler; maps `ValidationException` → 400
+- `ValidationBehavior` — FluentValidation before handler; maps `ValidationException` → 422 (handled by `GlobalExceptionMiddleware`)
 
 ### 3.7 WebhookOptions and Startup Validation
 
 ```csharp
-// API/Options/WebhookOptions.cs
+// Application/Options/WebhookOptions.cs
 public sealed class WebhookOptions
 {
     [Required, Url]
@@ -429,7 +432,7 @@ public sealed class WebhookOptions
     public int MaxRequestSizeMb { get; init; } = 5;
 }
 
-// API/Options/WebhookOptionsValidator.cs
+// Application/Options/WebhookOptionsValidator.cs
 public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
 {
     public ValidateOptionsResult Validate(string? name, WebhookOptions options)
@@ -443,7 +446,7 @@ public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
 }
 ```
 
-Registered with `.ValidateOnStart()` — application fails to start if any option is invalid.
+Registered with `.ValidateOnStart()` — application fails to start if any option is invalid. Note: `WebhookOptions` now lives in `Application.Options` namespace; any identical copy in `API.Options` is dead code.
 
 ### 3.8 Request Body Handling (fixed)
 
@@ -513,6 +516,8 @@ if (cached is null || !cached.IsActive)
 }
 ```
 
+**Cache eviction:** All mutations (`SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`) explicitly call `_memoryCache.Remove($"token:{token.Token}")` after successful UPDATE/DELETE to prevent stale data.
+
 ### 3.11 Startup Pipeline (Program.cs order)
 
 ```csharp
@@ -532,8 +537,9 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { /* SqlServer check
 builder.WebHost.ConfigureKestrel(opt =>
     opt.Limits.MaxRequestBodySize = opts.MaxRequestSizeMb * 1024L * 1024L);
 
+// Polly retry: handles OperationCanceledException; excludes from retry
 await Policy
-    .Handle<Exception>()
+    .Handle<Exception>(ex => ex is not OperationCanceledException)
     .WaitAndRetryAsync(5, i => TimeSpan.FromSeconds(i * 2),
         onRetry: (ex, ts) => logger.Warning("DB not ready, retrying in {Delay}s", ts.TotalSeconds))
     .ExecuteAsync(async () =>
@@ -571,13 +577,16 @@ public sealed class RetentionCleanupService : BackgroundService
             }
             catch (Exception ex)
             {
-                // Log and continue — a failed tick is not fatal; retry on next 24h tick
+                // Log and continue — a failed tick is not fatal; service does NOT stop
+                // will retry on next 24h tick
                 _logger.LogError(ex, "Retention cleanup failed — will retry on next tick");
             }
         }
     }
 }
 ```
+
+Note: The entire cleanup work is wrapped in try/catch. DB errors (connectivity, timeout, constraint violations) are logged but do not crash or stop the `BackgroundService` timer.
 
 ### 3.13 CORS Configuration (corrected)
 
@@ -945,7 +954,7 @@ server {
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 
-    location /api/events/ {          # SSE — must disable all buffering
+    location ~ ^/api/tokens/[^/]+/sse$ {
         proxy_pass                    http://api:8080;
         proxy_http_version            1.1;
         proxy_set_header              Connection "";
@@ -976,8 +985,6 @@ server {
     }
 }
 ```
-
-Note: No `/internal/` block — that endpoint no longer exists.
 
 ---
 
@@ -1066,7 +1073,7 @@ Exit criteria: Build green; `dotnet ef migrations script` produces valid SQL wit
 - [ ] `ResetCustomResponseCommand` + handler (**cache invalidate**)
 - [ ] `GetTokensQuery` — filters `WHERE IsActive = 1`
 - [ ] `GetTokenByIdQuery` — 404 if inactive
-- [ ] `TokensController` — full CRUD
+- [ ] `TokensController` — full CRUD; custom response endpoint: `PUT /api/tokens/{uuid}/custom-response`
 - [ ] `WebhookController`:
   - [ ] `Request.EnableBuffering()` as first line
   - [ ] Read body unconditionally (no ContentLength gate)
@@ -1081,13 +1088,13 @@ Exit criteria: Build green; `dotnet ef migrations script` produces valid SQL wit
 - [ ] Kestrel `MaxRequestBodySize` from `WebhookOptions` in `Program.cs`
 - [ ] `[RequestSizeLimit]` attribute on WebhookController action
 - [ ] CORS from `Cors:AllowedOrigins` with `RemoveEmptyEntries` split
-- [ ] `GlobalExceptionMiddleware` → ProblemDetails
+- [ ] `GlobalExceptionMiddleware` → ProblemDetails; maps `ValidationException` → 422
 - [ ] Swagger configured
-- [ ] EF migrations applied via Polly retry on startup
+- [ ] EF migrations applied via Polly retry (excludes `OperationCanceledException`)
 
 Unit tests: `CreateTokenHandlerTests`, `DeleteTokenHandlerTests`, `SetCustomResponseHandlerTests` (verify cache invalidated), `ResetCustomResponseHandlerTests` (verify cache invalidated).
 
-Exit criteria: `curl -X POST http://localhost:8080/webhook/{guid}` returns 200; row in DB with correct IpAddress (not 127.0.0.1); cache invalidation verified via unit test.
+Exit criteria: `curl -X POST http://localhost:8080/webhook/{guid}` returns 200; row in DB with correct IpAddress (not 127.0.0.1); cache invalidation verified via unit test; validation errors return 422.
 
 ---
 
@@ -1101,34 +1108,36 @@ Exit criteria: `curl -X POST http://localhost:8080/webhook/{guid}` returns 200; 
   - [ ] `NotifyAsync`: `TryWrite` to all channels (non-blocking; silently drops if full)
   - [ ] `NotifyTokenDeleted`: write event; `Channel.Writer.Complete()` all; remove from dict
 - [ ] Replace `NullSseNotifier` registration with real `SseNotifier` in `Infrastructure/DependencyInjection.cs`
-- [ ] `EventsController`:
+- [ ] `SseController` (replaces `EventsController`):
+  - [ ] Route: `GET /api/tokens/{tokenId}/sse`
   - [ ] Catch `TooManyConnectionsException` → 429
   - [ ] `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`
-  - [ ] `retry: 3000` field in SSE response (controls browser reconnect interval)
+  - [ ] First SSE line: `retry: 5000\n\n` (controls browser reconnect interval)
   - [ ] Loop: `await foreach (var evt in sseNotifier.SubscribeAsync(tokenId, ct))`
   - [ ] Background timer sends `comment: ping` every 15s
 - [ ] `TooManyConnectionsException` in Domain (mapped to 429 in GlobalExceptionMiddleware)
-- [ ] Verified with `curl --no-buffer http://localhost:8080/api/events/{uuid}`
+- [ ] Verified with `curl --no-buffer http://localhost:8080/api/tokens/{uuid}/sse`
 
 Unit tests: `SseNotifierTests` (subscribe, notify, token-deleted, 11th connection throws).
 
-Exit criteria: Events appear in SSE stream immediately after `curl -X POST /webhook/{uuid}`; `token-deleted` closes stream; 11th connection → 429.
+Exit criteria: Events appear in SSE stream immediately after `curl -X POST /webhook/{uuid}`; `token-deleted` closes stream; 11th connection → 429; response begins with `retry: 5000`.
 
 ---
 
 ### Phase 4 — Request Management API
 **Status: Complete | Target: Days 8–9**
 
-- [ ] `GetRequestsQuery` + handler — `PagedResult<WebhookRequestSummaryDto>` (no body); LIKE search on Headers+Body; `pageSize` ≤ 100 enforced by FluentValidation; two DB calls (COUNT + paged SELECT)
-- [ ] `GetRequestByIdQuery` + handler — `WebhookRequestDetailDto` (with body + `IsBodyBase64`)
-- [ ] `ExportRequestQuery` + handler — serialises `WebhookRequestDetailDto` to JSON bytes
-- [ ] `DeleteRequestCommand`, `ClearRequestsCommand` + handlers
+- [ ] `GetRequestsQuery` + handler — `PagedResult<WebhookRequestSummaryDto>` (no body); LIKE search on Headers+Body; `pageSize` ≤ 100 enforced by FluentValidation; two DB calls (COUNT + paged SELECT); **includes TokenId ownership check**
+- [ ] `GetRequestByIdQuery` + handler — `WebhookRequestDetailDto` (with body + `IsBodyBase64`); **includes TokenId ownership check** for IDOR prevention
+- [ ] `ExportRequestQuery` + handler — serialises `WebhookRequestDetailDto` to JSON bytes; **includes TokenId ownership check**
+- [ ] `DeleteRequestCommand`, `ClearRequestsCommand` + handlers (with TokenId ownership check)
 - [ ] `RequestsController` — all endpoints
 - [ ] `PagedResult<T>` model in Application/Common/Models
+- [ ] All repository reads use `.AsNoTracking()` for efficiency
 
-Unit tests: `GetRequestsHandlerTests` (pageSize limit, LIKE search, no body in SummaryDto), `ExportRequestHandlerTests`.
+Unit tests: `GetRequestsHandlerTests` (pageSize limit, LIKE search, no body in SummaryDto, ownership check), `ExportRequestHandlerTests` (ownership check).
 
-Exit criteria: List has no body; detail has body; `pageSize=101` → 400; search term filters correctly; export downloads valid JSON.
+Exit criteria: List has no body; detail has body; `pageSize=101` → 422; search term filters correctly; export downloads valid JSON; unauthorized TokenId returns 404 (via ownership check).
 
 ---
 
@@ -1189,14 +1198,17 @@ Exit criteria: Send 5 webhook requests; each appears in SEQ with `{TokenId, Meth
   ENTRYPOINT ["dotnet", "WebhookService.API.dll"]
   ```
 - [ ] `docker/frontend/Dockerfile` (Node build → Nginx Alpine copy)
-- [ ] `docker/frontend/nginx.conf` — Host header, X-Forwarded-For on all locations; SSE settings; no `/internal/` block
+- [ ] `docker/frontend/nginx.conf`:
+  - [ ] Host header, X-Forwarded-For on all locations
+  - [ ] SSE location: `~ ^/api/tokens/[^/]+/sse$` with `proxy_buffering off`, `proxy_read_timeout 3600s`
+  - [ ] Webhook location: `/webhook/` (not `/api/events/`)
 - [ ] `docker-compose.yml` — 4 services; `ASPNETCORE_HTTP_PORTS: "8080"`; no default for `Webhook__BaseUrl`
 - [ ] `docker-compose.override.yml` — CORS for Angular dev; `Webhook__BaseUrl: http://localhost`
 - [ ] `.env.example` — document that `WEBHOOK_BASE_URL` is required
 - [ ] `docker compose up --build` — all 4 containers healthy
-- [ ] Verify: `curl http://localhost/webhook/{guid}` → 200; SSE stream delivers events; SEQ receives logs; `/health/ready` → 200; captured `IpAddress` is NOT `172.x.x.x`
+- [ ] Verify: `curl http://localhost/webhook/{guid}` → 200; SSE endpoint at `GET /api/tokens/{uuid}/sse` delivers events; SEQ receives logs; `/health/ready` → 200; captured `IpAddress` is NOT `172.x.x.x`
 
-Exit criteria: All 4 services healthy; IP capture shows real host IP; webhook URL in response is `http://localhost/webhook/...` (not `http://api:8080/...`).
+Exit criteria: All 4 services healthy; IP capture shows real host IP; webhook URL in response is `http://localhost/webhook/...` (not `http://api:8080/...`); SSE response begins with `retry: 5000`.
 
 ---
 
@@ -1211,7 +1223,8 @@ Exit criteria: All 4 services healthy; IP capture shows real host IP; webhook UR
 - [ ] `TokenService`, `RequestService`
 - [ ] `SseService`:
   - [ ] `EventSource` → `Observable<SseEvent>` via RxJS
-  - [ ] `error` event → close and reconnect after 3s
+  - [ ] URL: `GET /api/tokens/{tokenId}/sse`
+  - [ ] `error` event → close and reconnect after 5s (matches server-side `retry: 5000`)
   - [ ] `connected$: BehaviorSubject<boolean>`
   - [ ] Emits typed events: `new-request`, `token-deleted`
 - [ ] `DashboardComponent` — token list; "New URL" button; copy URL
@@ -1219,6 +1232,7 @@ Exit criteria: All 4 services healthy; IP capture shows real host IP; webhook UR
   - [ ] Left panel: request list (SSE live-prepend); `SseStatusComponent`
   - [ ] `token-deleted` event → `router.navigate(['/'])`
   - [ ] Right panel: request detail on row click
+  - [ ] Custom response endpoint: `PUT /api/tokens/{uuid}/custom-response`
 - [ ] `CustomResponseDialogComponent` — status code, content-type, headers (key-value list), body
 - [ ] `SearchBarComponent` — 300ms debounce; emitting **resets page to 1**
 - [ ] `CopyButtonComponent` — `navigator.clipboard.writeText` + Angular Material Snackbar
@@ -1283,8 +1297,8 @@ WebhookService.UnitTests/
 WebhookService.IntegrationTests/
 ├── TokensApiTests.cs         ← CRUD; 404 on soft-deleted; cache invalidated on CustomResponse update
 ├── WebhookReceiverTests.cs   ← row in DB after POST; body captured for chunked requests (no Content-Length)
-├── RequestsApiTests.cs       ← list has no body; detail has body; pageSize=101 → 400; search filters
-├── SseConnectionTests.cs     ← SSE delivers event immediately; 11th connection → 429
+├── RequestsApiTests.cs       ← list has no body; detail has body; pageSize=101 → 422; search filters; IDOR check
+├── SseConnectionTests.cs     ← SSE delivers event immediately; 11th connection → 429; response begins with "retry: 5000"
 │                                (use CancellationTokenSource with short timeout per connection)
 └── HealthCheckTests.cs       ← /health/live always 200; /health/ready 200 with DB up
 ```
@@ -1301,12 +1315,12 @@ WebhookService.IntegrationTests/
 ```
 WebhookService.E2ETests/
 ├── Fixtures/
-│   └── DockerComposeFixture.cs    ← GlobalSetup/Teardown; waits for health checks
+│   └── DockerComposeFixture.cs    ← GlobalSetup/Teardown; waits for health checks (Docker Compose v2 `--wait`)
 ├── CreateTokenTest.cs             ← create, copy URL (snackbar), URL contains correct BaseUrl
-├── ReceiveRequestRealtimeTest.cs  ← POST via HttpClient; appears in SPA list without refresh
-├── SseIndicatorTest.cs            ← green dot visible when SSE connected
+├── ReceiveRequestRealtimeTest.cs  ← POST via HttpClient; appears in SPA list without refresh via SSE
+├── SseIndicatorTest.cs            ← green dot visible when SSE connected; endpoint is /api/tokens/{id}/sse
 ├── SearchRequestsTest.cs          ← 3 requests; search term filters to correct one; page resets to 1
-├── CustomResponseTest.cs          ← configure 201; send request; caller receives 201
+├── CustomResponseTest.cs          ← configure 201 via PUT /api/tokens/{uuid}/custom-response; send request; caller receives 201
 ├── ExportRequestTest.cs           ← download JSON; verify content matches request
 └── DeleteTokenTest.cs             ← delete; SPA navigates to dashboard; token absent from list
 ```

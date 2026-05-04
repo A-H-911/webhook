@@ -9,7 +9,7 @@ internal sealed class DeleteRequestCommandHandler(IWebhookRequestRepository repo
     public async Task<bool> Handle(DeleteRequestCommand request, CancellationToken cancellationToken)
     {
         var existing = await repository.GetByIdAsync(request.Id, cancellationToken);
-        if (existing is null)
+        if (existing is null || existing.TokenId != request.TokenId)
             return false;
 
         await repository.DeleteAsync(request.Id, cancellationToken);

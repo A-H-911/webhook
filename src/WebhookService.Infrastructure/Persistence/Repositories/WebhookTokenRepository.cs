@@ -11,13 +11,14 @@ internal sealed class WebhookTokenRepository : IWebhookTokenRepository
     public WebhookTokenRepository(ApplicationDbContext db) => _db = db;
 
     public Task<WebhookToken?> GetByIdAsync(Guid id, CancellationToken ct = default)
-        => _db.WebhookTokens.FirstOrDefaultAsync(t => t.Id == id && t.IsActive, ct);
+        => _db.WebhookTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id && t.IsActive, ct);
 
     public Task<WebhookToken?> GetByTokenAsync(Guid token, CancellationToken ct = default)
-        => _db.WebhookTokens.FirstOrDefaultAsync(t => t.Token == token && t.IsActive, ct);
+        => _db.WebhookTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Token == token && t.IsActive, ct);
 
     public async Task<IReadOnlyList<WebhookToken>> GetAllActiveAsync(CancellationToken ct = default)
         => await _db.WebhookTokens
+                    .AsNoTracking()
                     .Where(t => t.IsActive)
                     .OrderByDescending(t => t.CreatedAt)
                     .ToListAsync(ct);

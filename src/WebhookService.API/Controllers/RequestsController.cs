@@ -27,14 +27,14 @@ public sealed class RequestsController(IMediator mediator) : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid tokenId, Guid id, CancellationToken ct)
     {
-        var request = await mediator.Send(new GetRequestByIdQuery(id), ct);
+        var request = await mediator.Send(new GetRequestByIdQuery(tokenId, id), ct);
         return request is null ? NotFound() : Ok(request);
     }
 
     [HttpGet("{id:guid}/export")]
     public async Task<IActionResult> Export(Guid tokenId, Guid id, CancellationToken ct)
     {
-        var result = await mediator.Send(new ExportRequestQuery(id), ct);
+        var result = await mediator.Send(new ExportRequestQuery(tokenId, id), ct);
         if (result is null) return NotFound();
         return File(result, "application/json", $"request-{id}.json");
     }
@@ -49,7 +49,7 @@ public sealed class RequestsController(IMediator mediator) : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid tokenId, Guid id, CancellationToken ct)
     {
-        var deleted = await mediator.Send(new DeleteRequestCommand(id), ct);
+        var deleted = await mediator.Send(new DeleteRequestCommand(tokenId, id), ct);
         return deleted ? NoContent() : NotFound();
     }
 }
