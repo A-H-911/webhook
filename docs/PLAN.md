@@ -338,14 +338,18 @@ GET    /health/ready                             → 200  if WebhookDb reachable
 ```
 retry: 5000                        (first line — tells EventSource to reconnect after 5s if disconnected)
 
-event: new-request
-data: {"id":"...","method":"POST","path":"/webhook/...","receivedAt":"...","sizeBytes":342,"ipAddress":"1.2.3.4"}
+event: request
+data: {"id":"...","method":"POST","path":"/webhook/...","receivedAt":"..."}
 
 event: token-deleted
 data: {}
 
 comment: ping                      (every 15s keepalive — keeps Nginx proxy alive)
 ```
+
+> **Wire vs internal name:** The backend sends `event: request`. The Angular `SseService` listens via
+> `es.addEventListener('request', ...)` and re-maps to the internal discriminant `eventType: 'new-request'`.
+> Do not rename the backend event to `new-request` — the two names are intentionally different.
 
 ### 3.4 SseEvent Record
 
@@ -771,7 +775,7 @@ WebhookService.sln
 │           │   ├── services/
 │           │   │   ├── token.service.ts
 │           │   │   ├── request.service.ts
-│           │   │   └── sse.service.ts          ← EventSource → Observable; 3s reconnect; connected$ BehaviorSubject
+│           │   │   └── sse.service.ts          ← EventSource → Observable<SseEvent>; onopen emits 'connected'; maps event:request → 'new-request'
 │           │   └── interceptors/
 │           │       └── http-error.interceptor.ts  ← global HTTP error toasts
 │           ├── features/
@@ -1224,9 +1228,10 @@ Exit criteria: All 4 services healthy; IP capture shows real host IP; webhook UR
 - [ ] `SseService`:
   - [ ] `EventSource` → `Observable<SseEvent>` via RxJS
   - [ ] URL: `GET /api/tokens/{tokenId}/sse`
-  - [ ] `error` event → close and reconnect after 5s (matches server-side `retry: 5000`)
-  - [ ] `connected$: BehaviorSubject<boolean>`
-  - [ ] Emits typed events: `new-request`, `token-deleted`
+  - [ ] `es.onopen` emits `{ eventType: 'connected' }` → component sets green dot immediately
+  - [ ] `es.onerror` emits `{ eventType: 'disconnected' }` → component sets red dot (EventSource auto-reconnects via `retry: 5000`)
+  - [ ] Listens for `event: request` (wire name) → emits `{ eventType: 'new-request', data }` (internal name)
+  - [ ] Listens for `event: token-deleted` → completes Observable and closes EventSource
 - [ ] `DashboardComponent` — token list; "New URL" button; copy URL
 - [ ] `TokenDetailComponent`:
   - [ ] Left panel: request list (SSE live-prepend); `SseStatusComponent`

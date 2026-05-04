@@ -74,7 +74,11 @@ internal sealed class SseNotifier : ISseNotifier
             _subscribers.TryRemove(tokenId, out _);
         }
 
+        var deletedEvt = new SseEvent("token-deleted", "{}");
         foreach (var channel in snapshot)
+        {
+            channel.Writer.TryWrite(deletedEvt);
             channel.Writer.TryComplete();
+        }
     }
 }

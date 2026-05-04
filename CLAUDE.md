@@ -95,7 +95,7 @@ docker/
 
 **URL routing:** The webhook *receiver* endpoint is `POST /webhook/{token:guid}`. The `webhookUrl` field shown in the UI and stored in the DB is `{baseUrl}/webhook/{guid}`.
 
-**SSE endpoint:** `GET /api/tokens/{tokenId}/sse` — not `/api/events/`. Max 10 concurrent SSE connections per token. SSE response begins with `retry: 5000\n\n` before the event loop.
+**SSE endpoint:** `GET /api/tokens/{tokenId}/sse` — not `/api/events/`. Max 10 concurrent SSE connections per token. SSE response begins with `retry: 5000\n\n` before the event loop. **Wire event name is `event: request`** (not `new-request`) — `SseService` listens via `es.addEventListener('request', ...)` and maps to internal type `eventType: 'new-request'`. The `onopen` handler emits `{ eventType: 'connected' }` so the green dot appears immediately on connect, not only on first event.
 
 **Retention cleanup is a BackgroundService:** `RetentionCleanupService` runs on a 24-hour `PeriodicTimer` using `IServiceScopeFactory`. Hangfire is not used in this project. The service wraps all cleanup work in try/catch — DB errors are logged and do not stop the timer.
 

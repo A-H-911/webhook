@@ -3,6 +3,8 @@ import { Observable } from 'rxjs';
 import { RequestSummary } from '../models/request-summary.model';
 
 export type SseEvent =
+  | { eventType: 'connected' }
+  | { eventType: 'disconnected' }
   | { eventType: 'new-request'; data: RequestSummary }
   | { eventType: 'token-deleted' };
 
@@ -12,7 +14,10 @@ export class SseService {
     return new Observable<SseEvent>((subscriber) => {
       const es = new EventSource(`/api/tokens/${tokenId}/sse`);
 
-      es.addEventListener('new-request', (e: MessageEvent) => {
+      es.onopen = () => subscriber.next({ eventType: 'connected' });
+
+      // Backend sends `event: request` (matches SseNotifier.NotifyAsync)
+      es.addEventListener('request', (e: MessageEvent) => {
         try {
           subscriber.next({ eventType: 'new-request', data: JSON.parse(e.data) });
         } catch {
@@ -26,8 +31,7 @@ export class SseService {
         es.close();
       });
 
-      // EventSource auto-reconnects using `retry:` interval sent by server
-      es.onerror = () => {};
+      es.onerror = () => subscriber.next({ eventType: 'disconnected' });
 
       return () => es.close();
     });

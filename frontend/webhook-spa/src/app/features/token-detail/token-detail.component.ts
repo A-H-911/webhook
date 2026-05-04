@@ -1,6 +1,4 @@
-import {
-  Component, inject, signal, computed, OnInit, OnDestroy, DestroyRef
-} from '@angular/core';
+import { Component, inject, signal, computed, OnInit, OnDestroy, DestroyRef } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -31,9 +29,16 @@ const PAGE_SIZE = 20;
   selector: 'app-token-detail',
   standalone: true,
   imports: [
-    RouterLink, DatePipe, FormsModule,
-    MatButtonModule, MatIconModule, MatInputModule, MatFormFieldModule,
-    MatProgressSpinnerModule, MatTooltipModule, MatDividerModule,
+    RouterLink,
+    DatePipe,
+    FormsModule,
+    MatButtonModule,
+    MatIconModule,
+    MatInputModule,
+    MatFormFieldModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule,
+    MatDividerModule,
   ],
   templateUrl: './token-detail.component.html',
   styleUrl: './token-detail.component.scss',
@@ -70,21 +75,19 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.tokenService.getToken(this.tokenId).subscribe({
-      next: t => this.token.set(t),
+      next: (t) => this.token.set(t),
       error: () => this.router.navigate(['/dashboard']),
     });
     this.loadRequests();
     this.connectSse();
 
-    this.searchSubject.pipe(
-      debounceTime(300),
-      distinctUntilChanged(),
-      takeUntilDestroyed(this.destroyRef),
-    ).subscribe(term => {
-      this.search = term;
-      this.page = 1;
-      this.loadRequests();
-    });
+    this.searchSubject
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
+      .subscribe((term) => {
+        this.search = term;
+        this.page = 1;
+        this.loadRequests();
+      });
   }
 
   ngOnDestroy(): void {
@@ -93,10 +96,14 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   private connectSse(): void {
     this.sseSub = this.sseService.connect(this.tokenId).subscribe({
-      next: event => {
-        this.connected.set(true);
-        if (event.eventType === 'new-request') {
-          this.requests.update(list => [event.data, ...list]);
+      next: (event) => {
+        if (event.eventType === 'connected') {
+          this.connected.set(true);
+        } else if (event.eventType === 'disconnected') {
+          this.connected.set(false);
+        } else if (event.eventType === 'new-request') {
+          this.connected.set(true);
+          this.requests.update((list) => [event.data, ...list]);
           this.total++;
         } else if (event.eventType === 'token-deleted') {
           this.snackBar.open('This webhook URL was deleted', 'OK', { duration: 4000 });
@@ -110,15 +117,14 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   loadRequests(): void {
     this.loading.set(true);
-    this.requestService.getRequests(this.tokenId, this.page, PAGE_SIZE, this.search)
-      .subscribe({
-        next: result => {
-          this.requests.set(result.items);
-          this.total = result.total;
-          this.loading.set(false);
-        },
-        error: () => this.loading.set(false),
-      });
+    this.requestService.getRequests(this.tokenId, this.page, PAGE_SIZE, this.search).subscribe({
+      next: (result) => {
+        this.requests.set(result.items);
+        this.total = result.total;
+        this.loading.set(false);
+      },
+      error: () => this.loading.set(false),
+    });
   }
 
   onSearchChange(term: string): void {
@@ -126,18 +132,27 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   }
 
   prevPage(): void {
-    if (this.page > 1) { this.page--; this.loadRequests(); }
+    if (this.page > 1) {
+      this.page--;
+      this.loadRequests();
+    }
   }
 
   nextPage(): void {
-    if (this.page < this.totalPages()) { this.page++; this.loadRequests(); }
+    if (this.page < this.totalPages()) {
+      this.page++;
+      this.loadRequests();
+    }
   }
 
   selectRequest(req: RequestSummary): void {
     this.detailLoading.set(true);
     this.selectedDetail.set(null);
     this.requestService.getRequestDetail(this.tokenId, req.id).subscribe({
-      next: detail => { this.selectedDetail.set(detail); this.detailLoading.set(false); },
+      next: (detail) => {
+        this.selectedDetail.set(detail);
+        this.detailLoading.set(false);
+      },
       error: () => this.detailLoading.set(false),
     });
   }
@@ -145,7 +160,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   deleteRequest(req: RequestSummary, event: MouseEvent): void {
     event.stopPropagation();
     this.requestService.deleteRequest(this.tokenId, req.id).subscribe(() => {
-      this.requests.update(list => list.filter(r => r.id !== req.id));
+      this.requests.update((list) => list.filter((r) => r.id !== req.id));
       this.total--;
       if (this.selectedDetail()?.id === req.id) this.selectedDetail.set(null);
     });
@@ -169,9 +184,9 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   deleteToken(): void {
     if (!confirm('Delete this webhook URL and all its requests permanently?')) return;
-    this.tokenService.deleteToken(this.tokenId).subscribe(() =>
-      this.router.navigate(['/dashboard'])
-    );
+    this.tokenService
+      .deleteToken(this.tokenId)
+      .subscribe(() => this.router.navigate(['/dashboard']));
   }
 
   openCustomResponse(): void {
@@ -181,38 +196,52 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
       width: '560px',
       data: t.customResponse,
     });
-    ref.afterClosed().subscribe((result?: { action: 'save'; dto: SetCustomResponseDto } | { action: 'reset' }) => {
-      if (!result) return;
-      if (result.action === 'reset') {
-        this.tokenService.resetCustomResponse(this.tokenId).subscribe(() => {
-          this.token.update(tok => tok ? { ...tok, customResponse: null } : tok);
-          this.snackBar.open('Custom response removed', 'OK', { duration: 3000 });
-        });
-      } else {
-        this.tokenService.setCustomResponse(this.tokenId, result.dto).subscribe(updated => {
-          this.token.set(updated);
-          this.snackBar.open('Custom response saved', 'OK', { duration: 3000 });
-        });
-      }
-    });
+    ref
+      .afterClosed()
+      .subscribe((result?: { action: 'save'; dto: SetCustomResponseDto } | { action: 'reset' }) => {
+        if (!result) return;
+        if (result.action === 'reset') {
+          this.tokenService.resetCustomResponse(this.tokenId).subscribe(() => {
+            this.token.update((tok) => (tok ? { ...tok, customResponse: null } : tok));
+            this.snackBar.open('Custom response removed', 'OK', { duration: 3000 });
+          });
+        } else {
+          this.tokenService.setCustomResponse(this.tokenId, result.dto).subscribe((updated) => {
+            this.token.set(updated);
+            this.snackBar.open('Custom response saved', 'OK', { duration: 3000 });
+          });
+        }
+      });
   }
 
   copyUrl(): void {
     const url = this.token()?.webhookUrl ?? '';
-    navigator.clipboard.writeText(url).then(() =>
-      this.snackBar.open('URL copied', 'OK', { duration: 2000 })
-    );
+    navigator.clipboard
+      .writeText(url)
+      .then(() => this.snackBar.open('URL copied', 'OK', { duration: 2000 }));
   }
 
   formatHeaders(raw: string): string {
-    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
   }
 
   decodeBody(detail: RequestDetail): string {
     if (!detail.body) return '';
     if (detail.isBodyBase64) {
-      try { return atob(detail.body); } catch { return detail.body; }
+      try {
+        return atob(detail.body);
+      } catch {
+        return detail.body;
+      }
     }
-    try { return JSON.stringify(JSON.parse(detail.body), null, 2); } catch { return detail.body; }
+    try {
+      return JSON.stringify(JSON.parse(detail.body), null, 2);
+    } catch {
+      return detail.body;
+    }
   }
 }
