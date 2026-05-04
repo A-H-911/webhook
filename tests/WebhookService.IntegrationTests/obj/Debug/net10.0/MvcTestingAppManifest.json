@@ -1,0 +1,6 @@
+{
+  "WebhookService.API, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Users\\ahammo\\Repos\\webhook\\src\\WebhookService.API",
+  "WebhookService.Application, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Users\\ahammo\\Repos\\webhook\\src\\WebhookService.Application",
+  "WebhookService.Domain, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Users\\ahammo\\Repos\\webhook\\src\\WebhookService.Domain",
+  "WebhookService.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Users\\ahammo\\Repos\\webhook\\src\\WebhookService.Infrastructure"
+}

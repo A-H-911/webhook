@@ -1,0 +1,95 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+
+namespace WebhookService.IntegrationTests;
+
+[Collection("Integration")]
+public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebAppFactory>
+{
+    private readonly HttpClient _client = factory.CreateClient();
+
+    private static readonly JsonSerializerOptions JsonOpts =
+        new(JsonSerializerDefaults.Web);
+
+    private async Task<(string tokenId, string webhookToken)> CreateTokenAsync()
+    {
+        var response = await _client.PostAsJsonAsync("/api/tokens", new { description = "requests-test" });
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var id = body.GetProperty("id").GetString()!;
+        var url = body.GetProperty("webhookUrl").GetString()!;
+        return (id, url.Split('/').Last());
+    }
+
+    private async Task SendWebhookAsync(string webhookToken, string body = "{}")
+    {
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
+        await _client.PostAsync($"/hooks/{webhookToken}", content);
+    }
+
+    [Fact]
+    public async Task GetRequests_ReturnsPaginatedList()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+        await SendWebhookAsync(webhookToken);
+
+        var response = await _client.GetAsync($"/api/tokens/{tokenId}/requests?page=1&pageSize=10");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        result.GetProperty("total").GetInt32().Should().BeGreaterThanOrEqualTo(2);
+        result.GetProperty("items").GetArrayLength().Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task GetRequestDetail_ReturnsBodyAndHeaders()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken, "{\"key\":\"value\"}");
+
+        var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var detailResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests/{requestId}");
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        detail.GetProperty("headers").GetString().Should().NotBeNullOrEmpty();
+        detail.GetProperty("method").GetString().Should().Be("POST");
+    }
+
+    [Fact]
+    public async Task DeleteRequest_Returns204_ThenDetailReturns404()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+
+        var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var deleteResponse = await _client.DeleteAsync($"/api/tokens/{tokenId}/requests/{requestId}");
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var detailResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests/{requestId}");
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task ClearRequests_Returns204_AndListBecomesEmpty()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+        await SendWebhookAsync(webhookToken);
+
+        var clearResponse = await _client.DeleteAsync($"/api/tokens/{tokenId}/requests");
+        clearResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        list.GetProperty("total").GetInt32().Should().Be(0);
+    }
+}

@@ -1,0 +1,88 @@
+name: webhook-service
+
+services:
+
+  sqlserver:
+    build:
+      context: docker/sqlserver
+      dockerfile: Dockerfile
+    environment:
+      SA_PASSWORD: "${SA_PASSWORD}"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test:
+        - "/opt/mssql-tools18/bin/sqlcmd"
+        - "-S"
+        - "localhost"
+        - "-U"
+        - "sa"
+        - "-P"
+        - "${SA_PASSWORD}"
+        - "-C"
+        - "-Q"
+        - "SELECT name FROM sys.databases WHERE name = 'WebhookDb'"
+      interval: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - webhook-net
+
+  seq:
+    image: datalust/seq:latest
+    environment:
+      ACCEPT_EULA: "Y"
+    ports:
+      - "5341:5341"
+      - "5342:80"
+    volumes:
+      - seq-data:/data
+    networks:
+      - webhook-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ASPNETCORE_ENVIRONMENT: "Production"
+      ConnectionStrings__WebhookDb: "Server=sqlserver;Database=WebhookDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True"
+      Serilog__WriteTo__1__Name: "Seq"
+      Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
+      Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
+      Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
+      Webhook__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
+      Cors__AllowedOrigins: ""
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    networks:
+      - webhook-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - webhook-net
+
+volumes:
+  sqlserver-data:
+  seq-data:
+
+networks:
+  webhook-net:
+    driver: bridge

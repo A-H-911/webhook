@@ -1,0 +1,25 @@
+using System.Text.Json;
+using MediatR;
+using WebhookService.Domain.Entities;
+using WebhookService.Domain.Repositories;
+
+namespace WebhookService.Application.Requests.Queries.ExportRequest;
+
+internal sealed class ExportRequestQueryHandler(IWebhookRequestRepository repository)
+    : IRequestHandler<ExportRequestQuery, byte[]?>
+{
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    public async Task<byte[]?> Handle(ExportRequestQuery request, CancellationToken cancellationToken)
+    {
+        var r = await repository.GetByIdAsync(request.Id, cancellationToken);
+        return r is null ? null : JsonSerializer.SerializeToUtf8Bytes(ToExport(r), JsonOptions);
+    }
+
+    private static object ToExport(WebhookRequest r) => new
+    {
+        r.Id, r.TokenId, r.Method, r.Path, r.QueryString,
+        r.ReceivedAt, r.ContentType, r.Headers, r.Body,
+        r.IsBodyBase64, r.SizeBytes, r.IpAddress, r.UserAgent
+    };
+}

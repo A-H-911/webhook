@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WebhookService.API/WebhookService.API.csproj" />
+    <Project Path="src/WebhookService.Application/WebhookService.Application.csproj" />
+    <Project Path="src/WebhookService.Domain/WebhookService.Domain.csproj" />
+    <Project Path="src/WebhookService.Infrastructure/WebhookService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WebhookService.E2ETests/WebhookService.E2ETests.csproj" />
+    <Project Path="tests/WebhookService.IntegrationTests/WebhookService.IntegrationTests.csproj" />
+    <Project Path="tests/WebhookService.UnitTests/WebhookService.UnitTests.csproj" />
+  </Folder>
+</Solution>

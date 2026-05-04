@@ -1,0 +1,53 @@
+<div class="dashboard-container">
+  <div class="dashboard-header">
+    <h1>Webhook URLs</h1>
+    <button mat-fab extended color="primary" (click)="openCreate()">
+      <mat-icon>add</mat-icon>
+      New URL
+    </button>
+  </div>
+
+  @if (loading()) {
+    <div class="center-content">
+      <mat-spinner diameter="48" />
+    </div>
+  } @else if (tokens().length === 0) {
+    <div class="empty-state">
+      <mat-icon class="empty-icon">cable</mat-icon>
+      <p>No webhook URLs yet. Create one to start capturing requests.</p>
+      <button mat-stroked-button color="primary" (click)="openCreate()">
+        <mat-icon>add</mat-icon> Create webhook URL
+      </button>
+    </div>
+  } @else {
+    <div class="token-grid">
+      @for (token of tokens(); track token.id) {
+        <mat-card class="token-card" (click)="open(token)">
+          <mat-card-content>
+            <div class="token-url-row">
+              <code class="token-url">{{ token.webhookUrl }}</code>
+              <button mat-icon-button matTooltip="Copy URL" (click)="copyUrl(token, $event)">
+                <mat-icon>content_copy</mat-icon>
+              </button>
+            </div>
+            @if (token.description) {
+              <p class="token-description">{{ token.description }}</p>
+            }
+            <div class="token-meta">
+              <span>Created {{ token.createdAt | date:'medium' }}</span>
+              @if (token.customResponse) {
+                <span class="custom-badge">Custom response</span>
+              }
+            </div>
+          </mat-card-content>
+          <mat-card-actions align="end">
+            <button mat-icon-button color="warn" matTooltip="Delete"
+                    (click)="delete(token, $event)">
+              <mat-icon>delete</mat-icon>
+            </button>
+          </mat-card-actions>
+        </mat-card>
+      }
+    </div>
+  }
+</div>

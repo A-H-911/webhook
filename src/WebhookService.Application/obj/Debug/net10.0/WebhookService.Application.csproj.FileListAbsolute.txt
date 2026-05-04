@@ -1,0 +1,15 @@
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\bin\Debug\net10.0\WebhookService.Application.deps.json
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\bin\Debug\net10.0\WebhookService.Application.dll
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\bin\Debug\net10.0\WebhookService.Application.pdb
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\bin\Debug\net10.0\WebhookService.Domain.dll
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\bin\Debug\net10.0\WebhookService.Domain.pdb
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.csproj.AssemblyReference.cache
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.AssemblyInfoInputs.cache
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.AssemblyInfo.cs
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.csproj.CoreCompileInputs.cache
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookS.E98B7D6B.Up2Date
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.dll
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\refint\WebhookService.Application.dll
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\WebhookService.Application.pdb
+C:\Users\ahammo\Repos\webhook\src\WebhookService.Application\obj\Debug\net10.0\ref\WebhookService.Application.dll

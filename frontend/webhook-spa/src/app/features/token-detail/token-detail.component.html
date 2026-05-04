@@ -1,0 +1,156 @@
+<div class="detail-page">
+
+  <!-- Top bar -->
+  <div class="top-bar">
+    <button mat-icon-button routerLink="/dashboard" matTooltip="Back to dashboard">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+
+    <div class="url-section">
+      @if (token()) {
+        <code class="webhook-url">{{ token()!.webhookUrl }}</code>
+        <button mat-icon-button matTooltip="Copy URL" (click)="copyUrl()">
+          <mat-icon>content_copy</mat-icon>
+        </button>
+        <span class="sse-dot" [class.connected]="connected()"
+              [matTooltip]="connected() ? 'Live — receiving events' : 'Connecting…'"></span>
+      }
+    </div>
+
+    <div class="top-actions">
+      @if (token()?.customResponse) {
+        <span class="custom-badge">Custom response active</span>
+      }
+      <button mat-stroked-button (click)="openCustomResponse()">
+        <mat-icon>tune</mat-icon> Response
+      </button>
+      <button mat-stroked-button color="warn" (click)="clearAll()">
+        <mat-icon>clear_all</mat-icon> Clear
+      </button>
+      <button mat-flat-button color="warn" (click)="deleteToken()">
+        <mat-icon>delete</mat-icon> Delete URL
+      </button>
+    </div>
+  </div>
+
+  <mat-divider />
+
+  <!-- Two-panel layout -->
+  <div class="panels">
+
+    <!-- Left: request list -->
+    <div class="list-panel">
+      <div class="search-row">
+        <mat-form-field appearance="outline" class="search-field">
+          <mat-label>Search requests</mat-label>
+          <mat-icon matPrefix>search</mat-icon>
+          <input matInput [ngModel]="search"
+                 (ngModelChange)="onSearchChange($event)"
+                 placeholder="method, path, headers…" />
+        </mat-form-field>
+      </div>
+
+      @if (loading()) {
+        <div class="list-spinner"><mat-spinner diameter="36" /></div>
+      } @else if (requests().length === 0) {
+        <div class="list-empty">
+          <mat-icon>inbox</mat-icon>
+          <p>No requests yet. Send an HTTP request to the URL above.</p>
+        </div>
+      } @else {
+        <div class="request-list">
+          @for (req of requests(); track req.id) {
+            <div class="request-row"
+                 [class.selected]="selectedDetail()?.id === req.id"
+                 (click)="selectRequest(req)">
+              <span class="method-badge" [attr.data-method]="req.method">{{ req.method }}</span>
+              <div class="req-info">
+                <span class="req-path">{{ req.path }}</span>
+                <span class="req-meta">
+                  {{ req.receivedAt | date:'HH:mm:ss' }} &middot; {{ req.sizeBytes }} B &middot; {{ req.ipAddress }}
+                </span>
+              </div>
+              <button mat-icon-button matTooltip="Delete" class="row-action"
+                      (click)="deleteRequest(req, $event)">
+                <mat-icon>delete</mat-icon>
+              </button>
+            </div>
+          }
+        </div>
+
+        <div class="pagination">
+          <button mat-icon-button [disabled]="page <= 1" (click)="prevPage()">
+            <mat-icon>chevron_left</mat-icon>
+          </button>
+          <span>{{ page }} / {{ totalPages() }} ({{ total }} total)</span>
+          <button mat-icon-button [disabled]="page >= totalPages()" (click)="nextPage()">
+            <mat-icon>chevron_right</mat-icon>
+          </button>
+        </div>
+      }
+    </div>
+
+    <mat-divider [vertical]="true" />
+
+    <!-- Right: detail panel -->
+    <div class="detail-panel">
+      @if (detailLoading()) {
+        <div class="list-spinner"><mat-spinner diameter="36" /></div>
+      } @else if (!selectedDetail()) {
+        <div class="list-empty">
+          <mat-icon>touch_app</mat-icon>
+          <p>Select a request to inspect its details.</p>
+        </div>
+      } @else {
+        <div class="detail-content">
+          <div class="detail-header">
+            <span class="method-badge" [attr.data-method]="selectedDetail()!.method">
+              {{ selectedDetail()!.method }}
+            </span>
+            <span class="req-path">{{ selectedDetail()!.path }}</span>
+            <button mat-icon-button matTooltip="Export JSON" (click)="exportSelected()">
+              <mat-icon>download</mat-icon>
+            </button>
+          </div>
+
+          <div class="detail-grid">
+            <span class="detail-label">Received</span>
+            <span>{{ selectedDetail()!.receivedAt | date:'medium' }}</span>
+
+            <span class="detail-label">IP</span>
+            <span>{{ selectedDetail()!.ipAddress }}</span>
+
+            @if (selectedDetail()!.queryString) {
+              <span class="detail-label">Query</span>
+              <code>{{ selectedDetail()!.queryString }}</code>
+            }
+
+            @if (selectedDetail()!.contentType) {
+              <span class="detail-label">Content-Type</span>
+              <code>{{ selectedDetail()!.contentType }}</code>
+            }
+
+            @if (selectedDetail()!.userAgent) {
+              <span class="detail-label">User-Agent</span>
+              <span class="truncate">{{ selectedDetail()!.userAgent }}</span>
+            }
+          </div>
+
+          <div class="section-title">Headers</div>
+          <pre class="code-block">{{ formatHeaders(selectedDetail()!.headers) }}</pre>
+
+          @if (selectedDetail()!.body !== null) {
+            <div class="section-title">
+              Body
+              @if (selectedDetail()!.isBodyBase64) {
+                <span class="badge">base64 decoded</span>
+              }
+            </div>
+            <pre class="code-block body-block">{{ decodeBody(selectedDetail()!) }}</pre>
+          }
+        </div>
+      }
+    </div>
+
+  </div>
+</div>
