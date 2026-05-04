@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.MsSql;
 using WebhookService.Infrastructure.Persistence;
@@ -20,10 +21,17 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("Webhook__BaseUrl", "https://test.example.com");
-        builder.UseSetting("Webhook__RetentionDays", "7");
-        builder.UseSetting("Webhook__MaxRequestSizeMb", "5");
-        builder.UseSetting("Cors__AllowedOrigins", "");
+        builder.ConfigureAppConfiguration(config =>
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:WebhookDb"] = _db.GetConnectionString(),
+                ["Webhook:BaseUrl"] = "https://test.example.com",
+                ["Webhook:RetentionDays"] = "7",
+                ["Webhook:MaxRequestSizeMb"] = "5",
+                ["Cors:AllowedOrigins"] = ""
+            });
+        });
 
         builder.ConfigureServices(services =>
         {

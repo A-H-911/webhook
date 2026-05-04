@@ -11,7 +11,7 @@ internal sealed class WebhookTokenRepository : IWebhookTokenRepository
     public WebhookTokenRepository(ApplicationDbContext db) => _db = db;
 
     public Task<WebhookToken?> GetByIdAsync(Guid id, CancellationToken ct = default)
-        => _db.WebhookTokens.FirstOrDefaultAsync(t => t.Id == id, ct);
+        => _db.WebhookTokens.FirstOrDefaultAsync(t => t.Id == id && t.IsActive, ct);
 
     public Task<WebhookToken?> GetByTokenAsync(Guid token, CancellationToken ct = default)
         => _db.WebhookTokens.FirstOrDefaultAsync(t => t.Token == token && t.IsActive, ct);

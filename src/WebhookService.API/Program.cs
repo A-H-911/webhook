@@ -47,7 +47,7 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddHealthChecks()
     .AddSqlServer(
-        builder.Configuration.GetConnectionString("WebhookDb")!,
+        sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("WebhookDb")!,
         name: "sqlserver",
         tags: ["ready"]);
 
