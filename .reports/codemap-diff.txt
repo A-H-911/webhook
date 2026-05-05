@@ -1,29 +1,51 @@
-Codemap Scan Report — 2026-05-05
+Codemap Scan Report — 2026-05-06
 =================================
 
-Status: INITIAL GENERATION (no previous codemaps existed)
+Status: UPDATE CYCLE (checking changes since 2026-05-05)
 
-Files Generated
----------------
-docs/CODEMAPS/architecture.md   — System diagram, auth/webhook/SSE flows, CA dependency rule
-docs/CODEMAPS/backend.md        — Route→handler map, middleware chain, key files, options
-docs/CODEMAPS/frontend.md       — Page tree, component hierarchy, services, SSE wire protocol
-docs/CODEMAPS/data.md           — Table schemas, relationships, EF config, cache, retention
-docs/CODEMAPS/dependencies.md   — NuGet packages, npm packages, Docker services, env vars
+What Changed Since Last Codemap
+--------------------------------
+- tests/WebhookService.E2ETests/DashboardE2ETests.cs:
+  Refactored to use IClassFixture<DashboardE2EFixture> with primary constructor injection.
+  Pattern: class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixture<DashboardE2EFixture>
 
-Source Files Scanned
+- tests/WebhookService.E2ETests/DashboardE2EFixture.cs:
+  NEW FILE — extracted shared fixture implementing IAsyncLifetime.
+  Handles browser launch, auth setup, and cleanup once per test class.
+  Reason: Avoid hammering /api/auth/login rate limiter (5 req/min).
+
+Codemaps Reviewed
+-----------------
+docs/CODEMAPS/architecture.md   ✓ No changes needed (E2E test structure not documented)
+docs/CODEMAPS/backend.md        ✓ No changes needed (no route/middleware changes)
+docs/CODEMAPS/frontend.md       ✓ No changes needed (no component changes)
+docs/CODEMAPS/data.md           ✓ No changes needed (no schema changes)
+docs/CODEMAPS/dependencies.md   ✓ No changes needed (frameworks listed, fixture is implementation detail)
+
+Codemaps Updated
+----------------
+NONE — E2E fixture refactoring is test-only structural change with no architectural impact.
+
+Rationale
+---------
+The codemaps focus on production architecture, data flow, and dependencies.
+E2E test fixture pattern is implementation-specific and self-documenting via code comments.
+This pattern does not affect:
+  • API routes or handlers
+  • Database schema or retention
+  • Frontend component hierarchy
+  • Package dependencies
+  • Middleware pipeline
+  • CQRS handler map
+
+Staleness Assessment
 --------------------
-Backend (.NET):  ~95 .cs files across 4 projects (Domain, Application, Infrastructure, API)
-Frontend (Angular): 21 .ts files in src/app/
-Config: docker-compose.yml, .env.example, appsettings.json
-
-Architecture Changes (vs previous)
-------------------------------------
-N/A — first scan
-
-New Dependencies Detected
---------------------------
-N/A — first scan
+All codemaps remain fresh and accurate:
+- architecture.md: 2026-05-05 — Current (no system diagram changes)
+- backend.md:      2026-05-05 — Current (no route/handler changes)
+- frontend.md:     2026-05-05 — Current (no component changes)
+- data.md:         2026-05-05 — Current (no schema changes)
+- dependencies.md: 2026-05-05 — Current (no package upgrades)
 
 Notable Facts Captured
 ----------------------
@@ -32,7 +54,4 @@ Notable Facts Captured
 - Cancel button in CreateTokenDialog uses [mat-dialog-close]="null" (bound) not plain attribute
 - Headers field on SetCustomResponse is a raw JSON string on both C# and Angular sides
 - Token cache uses 5-min sliding expiry; null results explicitly NOT cached
-
-Staleness Warnings
-------------------
-None — fresh generation. Re-run /update-codemaps after major feature additions.
+- E2E tests use IClassFixture<DashboardE2EFixture> for shared browser/auth setup (2026-05-06)
