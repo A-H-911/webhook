@@ -1,0 +1,38 @@
+Codemap Scan Report — 2026-05-05
+=================================
+
+Status: INITIAL GENERATION (no previous codemaps existed)
+
+Files Generated
+---------------
+docs/CODEMAPS/architecture.md   — System diagram, auth/webhook/SSE flows, CA dependency rule
+docs/CODEMAPS/backend.md        — Route→handler map, middleware chain, key files, options
+docs/CODEMAPS/frontend.md       — Page tree, component hierarchy, services, SSE wire protocol
+docs/CODEMAPS/data.md           — Table schemas, relationships, EF config, cache, retention
+docs/CODEMAPS/dependencies.md   — NuGet packages, npm packages, Docker services, env vars
+
+Source Files Scanned
+--------------------
+Backend (.NET):  ~95 .cs files across 4 projects (Domain, Application, Infrastructure, API)
+Frontend (Angular): 21 .ts files in src/app/
+Config: docker-compose.yml, .env.example, appsettings.json
+
+Architecture Changes (vs previous)
+------------------------------------
+N/A — first scan
+
+New Dependencies Detected
+--------------------------
+N/A — first scan
+
+Notable Facts Captured
+----------------------
+- Cookie auth (not JWT) — required because SSE (EventSource) cannot set custom headers
+- SSE wire event name is "event: request" (not "new-request") — Angular adapter remaps internally
+- Cancel button in CreateTokenDialog uses [mat-dialog-close]="null" (bound) not plain attribute
+- Headers field on SetCustomResponse is a raw JSON string on both C# and Angular sides
+- Token cache uses 5-min sliding expiry; null results explicitly NOT cached
+
+Staleness Warnings
+------------------
+None — fresh generation. Re-run /update-codemaps after major feature additions.
