@@ -9,12 +9,9 @@ export const httpErrorInterceptor: HttpInterceptorFn = (req, next) => {
   return next(req).pipe(
     catchError((err: HttpErrorResponse) => {
       const message =
-        err.error?.detail ??
-        err.error?.title ??
-        err.message ??
-        'An unexpected error occurred';
+        err.error?.detail ?? err.error?.title ?? err.message ?? 'An unexpected error occurred';
       snackBar.open(message, 'Dismiss', { duration: 5000 });
       return throwError(() => err);
-    })
+    }),
   );
 };

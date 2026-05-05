@@ -17,8 +17,11 @@ import { CreateTokenDialogComponent } from './create-token-dialog.component';
   standalone: true,
   imports: [
     DatePipe,
-    MatCardModule, MatButtonModule, MatIconModule,
-    MatProgressSpinnerModule, MatTooltipModule,
+    MatCardModule,
+    MatButtonModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule,
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
@@ -39,7 +42,10 @@ export class DashboardComponent implements OnInit {
   load(): void {
     this.loading.set(true);
     this.tokenService.getTokens().subscribe({
-      next: tokens => { this.tokens.set(tokens); this.loading.set(false); },
+      next: (tokens) => {
+        this.tokens.set(tokens);
+        this.loading.set(false);
+      },
       error: () => this.loading.set(false),
     });
   }
@@ -48,8 +54,8 @@ export class DashboardComponent implements OnInit {
     const ref = this.dialog.open(CreateTokenDialogComponent, { width: '400px' });
     ref.afterClosed().subscribe((description: string | undefined) => {
       if (description === undefined) return;
-      this.tokenService.createToken(description || undefined).subscribe(token => {
-        this.tokens.update(list => [token, ...list]);
+      this.tokenService.createToken(description || undefined).subscribe((token) => {
+        this.tokens.update((list) => [token, ...list]);
         this.snackBar.open('Webhook URL created', 'OK', { duration: 3000 });
       });
     });
@@ -63,15 +69,15 @@ export class DashboardComponent implements OnInit {
     event.stopPropagation();
     if (!confirm('Delete this webhook URL? All captured requests will be removed.')) return;
     this.tokenService.deleteToken(token.id).subscribe(() => {
-      this.tokens.update(list => list.filter(t => t.id !== token.id));
+      this.tokens.update((list) => list.filter((t) => t.id !== token.id));
       this.snackBar.open('Deleted', 'OK', { duration: 3000 });
     });
   }
 
   copyUrl(token: Token, event: MouseEvent): void {
     event.stopPropagation();
-    navigator.clipboard.writeText(token.webhookUrl).then(() =>
-      this.snackBar.open('URL copied to clipboard', 'OK', { duration: 2000 })
-    );
+    navigator.clipboard
+      .writeText(token.webhookUrl)
+      .then(() => this.snackBar.open('URL copied to clipboard', 'OK', { duration: 2000 }));
   }
 }

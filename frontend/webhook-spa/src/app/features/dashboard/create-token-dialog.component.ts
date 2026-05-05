@@ -14,8 +14,13 @@ import { MatButtonModule } from '@angular/material/button';
     <mat-dialog-content>
       <mat-form-field appearance="outline" style="width:100%">
         <mat-label>Description (optional)</mat-label>
-        <input matInput [(ngModel)]="description" placeholder="e.g. GitHub events"
-               maxlength="200" (keydown.enter)="confirm()" />
+        <input
+          matInput
+          [(ngModel)]="description"
+          placeholder="e.g. GitHub events"
+          maxlength="200"
+          (keydown.enter)="confirm()"
+        />
       </mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">

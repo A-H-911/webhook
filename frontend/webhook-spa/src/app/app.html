@@ -3,6 +3,14 @@
     <mat-icon>cable</mat-icon>
     <span>Webhook Inspector</span>
   </a>
+  <span class="toolbar-spacer"></span>
+  <button
+    mat-icon-button
+    (click)="theme.toggle()"
+    [attr.aria-label]="theme.isDark() ? 'Switch to light mode' : 'Switch to dark mode'"
+  >
+    <mat-icon>{{ theme.isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
+  </button>
 </mat-toolbar>
 
 <main class="app-content">

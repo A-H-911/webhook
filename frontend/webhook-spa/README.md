@@ -46,13 +46,7 @@ ng test
 
 ## Running end-to-end tests
 
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+E2E tests live in the `tests/WebhookService.E2ETests/` project at the repo root (Playwright + xUnit). See the top-level `README.md` §13 Testing for setup instructions.
 
 ## Additional Resources
 

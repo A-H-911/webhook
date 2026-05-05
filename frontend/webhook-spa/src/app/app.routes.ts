@@ -5,12 +5,12 @@ export const routes: Routes = [
   {
     path: 'dashboard',
     loadComponent: () =>
-      import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent)
+      import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
   },
   {
     path: 'tokens/:id',
     loadComponent: () =>
-      import('./features/token-detail/token-detail.component').then(m => m.TokenDetailComponent)
+      import('./features/token-detail/token-detail.component').then((m) => m.TokenDetailComponent),
   },
-  { path: '**', redirectTo: 'dashboard' }
+  { path: '**', redirectTo: 'dashboard' },
 ];

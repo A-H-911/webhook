@@ -81,6 +81,7 @@ For local development without Docker:
 - **Retention cleanup** — automatically delete requests older than a configurable number of days (BackgroundService, 24-hour cycle)
 - **Structured logging** — all events streamed to SEQ for querying and alerting
 - **SSE connection safety** — max 10 concurrent connections per token; 11th connection receives HTTP 429
+- **Dark mode** — defaults to dark; user-toggleable, persisted in `localStorage`, flash-of-wrong-theme safe via inline script
 - **No authentication** — designed for trusted internal networks; see §11 Security Model
 
 ---
@@ -176,12 +177,12 @@ External callers ──────────────────► ANY /
 | Layer | Technology |
 |-------|-----------|
 | Backend | .NET 10, ASP.NET Core, Clean Architecture (Domain → Application → Infrastructure → API) |
-| Frontend | Angular (latest), Angular Material, SSE via EventSource |
+| Frontend | Angular 21 (standalone components), Angular Material 3, SSE via EventSource |
 | Database | SQL Server 2022 Developer Edition |
 | Real-time | Server-Sent Events (in-process, no broker) |
 | Logging | Serilog → SEQ |
 | Container | Docker Compose (4 services) |
-| Testing | xUnit + NSubstitute + FluentAssertions + Testcontainers + Playwright |
+| Testing | xUnit + NSubstitute + FluentAssertions + Testcontainers + Playwright (backend); Vitest (Angular) |
 
 ---
 
@@ -601,6 +602,8 @@ WebhookService.sln
 │
 ├── frontend/
 │   └── webhook-spa/src/app/
+│       ├── services/
+│       │   └── theme.service.ts         ← dark/light toggle; localStorage persistence; Angular signals
 │       ├── core/
 │       │   ├── models/                  ← token.model.ts, request-summary.model.ts, request-detail.model.ts
 │       │   ├── services/                ← token.service.ts, request.service.ts, sse.service.ts
@@ -845,6 +848,15 @@ dotnet test tests/WebhookService.IntegrationTests/
 
 Covers all API endpoints, pagination, LIKE search, IDOR ownership checks, chunked body capture, SSE limits, and health checks. Uses `WebApplicationFactory<Program>` + real SQL Server container. SSE is stubbed with `TestNullSseNotifier` — the real in-process notifier is not suited for isolated test assertions because it requires live SSE subscribers.
 
+### Angular Unit Tests — No Dependencies
+
+```bash
+cd frontend/webhook-spa
+npm test
+```
+
+Runs with **Vitest** via `@angular/build:unit-test`. Covers Angular component creation, template assertions, and services (e.g., `ThemeService` — dark/light toggle, localStorage persistence, error fallback). Uses `vi.stubGlobal('localStorage', ...)` for test isolation because Angular's Vitest environment provides a custom localStorage that bypasses `Storage.prototype`.
+
 ### E2E Tests — Full Stack Required
 
 ```bash
@@ -944,7 +956,7 @@ Review the generated migration before committing. Destructive changes (column dr
 
 - [ ] `dotnet build` passes with 0 errors
 - [ ] `dotnet format` applied
-- [ ] Unit tests added/updated and passing
+- [ ] Unit tests added/updated and passing (`dotnet test` for backend, `npm test` in `frontend/webhook-spa` for Angular)
 - [ ] If touching API contract: §7.3 table updated
 - [ ] If adding an env var: §10 Configuration Reference updated
 - [ ] If changing SSE wire name or `headers` contract type: §7.3 and §16 PA2 note updated

@@ -12,28 +12,21 @@ export class RequestService {
     tokenId: string,
     page = 1,
     pageSize = 20,
-    search = ''
+    search = '',
   ): Observable<PagedResult<RequestSummary>> {
-    let params = new HttpParams()
-      .set('page', page)
-      .set('pageSize', pageSize);
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (search.trim()) params = params.set('search', search.trim());
-    return this.http.get<PagedResult<RequestSummary>>(
-      `/api/tokens/${tokenId}/requests`,
-      { params }
-    );
+    return this.http.get<PagedResult<RequestSummary>>(`/api/tokens/${tokenId}/requests`, {
+      params,
+    });
   }
 
   getRequestDetail(tokenId: string, requestId: string): Observable<RequestDetail> {
-    return this.http.get<RequestDetail>(
-      `/api/tokens/${tokenId}/requests/${requestId}`
-    );
+    return this.http.get<RequestDetail>(`/api/tokens/${tokenId}/requests/${requestId}`);
   }
 
   deleteRequest(tokenId: string, requestId: string): Observable<void> {
-    return this.http.delete<void>(
-      `/api/tokens/${tokenId}/requests/${requestId}`
-    );
+    return this.http.delete<void>(`/api/tokens/${tokenId}/requests/${requestId}`);
   }
 
   clearRequests(tokenId: string): Observable<void> {
