@@ -28,7 +28,7 @@ public sealed class SseApiTests(WebAppFactory factory) : IClassFixture<WebAppFac
     }
 
     [Fact]
-    public async Task SseEndpoint_AcceptsAnyGuid_ReturnsEventStream()
+    public async Task SseEndpoint_Returns404_ForNonExistentToken()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/tokens/{Guid.NewGuid()}/sse");
@@ -37,8 +37,6 @@ public sealed class SseApiTests(WebAppFactory factory) : IClassFixture<WebAppFac
         using var response = await _client.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 
-        // SSE controller does not validate token existence — it streams for any guid
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        response.Content.Headers.ContentType!.MediaType.Should().Be("text/event-stream");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 }

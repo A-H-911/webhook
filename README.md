@@ -82,7 +82,7 @@ For local development without Docker:
 - **Structured logging** — all events streamed to SEQ for querying and alerting
 - **SSE connection safety** — max 10 concurrent connections per token; 11th connection receives HTTP 429
 - **Dark mode** — defaults to dark; user-toggleable, persisted in `localStorage`, flash-of-wrong-theme safe via inline script
-- **No authentication** — designed for trusted internal networks; see §11 Security Model
+- **Cookie-based authentication** — single admin credential configured via env vars; BCrypt-hashed password; session cookie (`SameSite=Lax`, `HttpOnly`); see §11 Security Model
 
 ---
 
@@ -713,23 +713,56 @@ All configuration is via environment variables.
 |----------|----------|---------|-------------|-------------|
 | `SA_PASSWORD` | **Yes** | — | Strong password | SQL Server SA password |
 | `WEBHOOK_BASE_URL` | **Yes** | — | Any non-empty URL | Base URL for generated webhook URLs (e.g. `http://192.168.1.10:8088`) |
+| `AUTH_USERNAME` | **Yes** | — | Any non-empty string | Admin login username |
+| `AUTH_PASSWORD_HASH` | **Yes** | — | BCrypt hash (`$2...`) | BCrypt hash of the admin password — never store plaintext |
 | `RETENTION_DAYS` | No | `7` | 0–365 | Days to keep requests; `0` = keep forever |
 | `MAX_REQUEST_SIZE_MB` | No | `5` | 1–100 | Max accepted request body size in MB |
+| `AUTH_SESSION_HOURS` | No | `8` | 1–168 | Session cookie lifetime in hours |
 | `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
 
-**Startup validation:** The API process exits immediately at startup if `WEBHOOK_BASE_URL` is missing/empty, or if `MAX_REQUEST_SIZE_MB` or `RETENTION_DAYS` are outside their valid ranges. Silent misconfiguration is worse than a fast failure.
+**Generating a BCrypt hash** (run once, store the output as `AUTH_PASSWORD_HASH`):
+
+```bash
+# Python
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'YourStr0ngP@ss!', bcrypt.gensalt(12)).decode())"
+
+# Node.js (bcryptjs)
+node -e "const b=require('bcryptjs'); console.log(b.hashSync('YourStr0ngP@ss!',12))"
+
+# htpasswd
+htpasswd -bnBC 12 "" "YourStr0ngP@ss!" | tr -d ':\n'
+```
+
+**Startup validation:** The API process exits immediately at startup if `WEBHOOK_BASE_URL`, `AUTH_USERNAME`, or `AUTH_PASSWORD_HASH` are missing/invalid, or if `MAX_REQUEST_SIZE_MB`, `RETENTION_DAYS`, or `AUTH_SESSION_HOURS` are outside their valid ranges. Silent misconfiguration is worse than a fast failure.
 
 ---
 
 ## 11. Security Model
 
-### No Authentication — By Design
+### Cookie-Based Authentication
 
-This service has no authentication layer. It is designed for trusted internal networks (LAN, VPN, private subnet). Anyone who can reach the port can:
+All management endpoints require a valid session cookie. The webhook receiver (`/webhook/{token:guid}`) and health endpoints remain anonymous — external callers must not need credentials to deliver webhooks, and Docker needs the health endpoints for container orchestration.
 
-- Create and delete webhook tokens
-- View all captured requests (including potentially sensitive request bodies)
-- Configure custom responses
+**Credential storage:** The admin password is stored as a BCrypt hash in `AUTH_PASSWORD_HASH`. The application never sees or stores the plaintext password. BCrypt's inherent work factor provides protection against brute-force if the hash is ever exposed.
+
+**Session cookie properties:**
+- `HttpOnly` — not accessible from JavaScript; mitigates XSS token theft
+- `SameSite=Lax` — blocks cross-site POST CSRF while allowing bookmarks and link navigation
+- `Secure` flag follows `X-Forwarded-Proto` via `ForwardedHeaders` middleware — set to HTTPS in production
+- Sliding expiration: `AUTH_SESSION_HOURS` (default 8 h)
+
+**Why cookie auth, not Bearer JWT?** `EventSource` (used for SSE) cannot send custom headers. Cookies are sent automatically by the browser on every request, including SSE connections. Bearer tokens would require server-side changes to the SSE endpoint.
+
+**Endpoint protection map:**
+
+| Route | Auth |
+|-------|------|
+| `POST /api/auth/login` | Anonymous — login itself |
+| `POST /api/auth/logout` | Anonymous — must work with expired/missing session |
+| `GET /api/auth/me` | Requires session |
+| `ANY /webhook/{token:guid}` | Anonymous — external callers |
+| All other `/api/**` routes | Requires session (global fallback policy) |
+| `GET /health/live`, `/health/ready` | Anonymous — Docker health checks |
 
 **Deployment recommendations:**
 
@@ -737,8 +770,7 @@ This service has no authentication layer. It is designed for trusted internal ne
 - Use firewall rules to restrict access to trusted IP ranges
 - Do not expose port 8088 to the public internet
 - SEQ (port 5342) is already `127.0.0.1`-bound — keep it that way
-
-**To add authentication:** JWT middleware + `[Authorize]` on all API controllers. The Domain and Application layers have no auth dependencies. See §18 Future Roadmap.
+- Rotate credentials by updating `AUTH_PASSWORD_HASH` and restarting the API container
 
 ### Stored Data
 
@@ -1072,7 +1104,7 @@ Review the generated migration before committing. Destructive changes (column dr
 | Soft-deleted tokens remain in DB | DB accumulates inactive rows | Negligible at < 100 URL scale |
 | `RetentionCleanupService` first tick is 24h after startup | No cleanup on day of startup | Acceptable |
 | No bulk export (all requests for a token) | Out of scope | Documented as future path |
-| No authentication | Anyone on the network can access all data | Designed for trusted internal networks; auth upgrade path documented |
+| Single admin account | No per-user roles or multi-user support | Sufficient for single-operator self-hosted use; multi-user path: add user table + roles |
 
 ---
 
@@ -1081,7 +1113,7 @@ Review the generated migration before committing. Destructive changes (column dr
 | Feature | Trigger | Migration Path |
 |---------|---------|----------------|
 | Redis for SSE + distributed cache | API needs horizontal scaling | Replace `SseNotifier` with Redis Pub/Sub; replace `IMemoryCache` with `IDistributedCache`. `ISseNotifier` interface unchanged. |
-| Authentication | Security requirement | JWT middleware + `[Authorize]` on all controllers. Domain/Application layers unchanged. |
+| Multi-user / RBAC | Multiple operators with separate credentials | Add user table + roles; replace single `AuthOptions` with a user store. Domain/Application layers unchanged. |
 | Full-Text Search | `LIKE` too slow at scale | Add FTS catalog in EF migration; replace `LIKE` with `EF.Functions.Contains()`. One handler change. |
 | Bulk export | User request | `GET /api/tokens/{uuid}/requests/export` returning NDJSON or ZIP. |
 | Hangfire | Complex scheduled jobs needed | Add `WebhookService.Worker` project; move `RetentionCleanupService` to recurring Hangfire job. |
@@ -1093,6 +1125,7 @@ Review the generated migration before committing. Destructive changes (column dr
 | Service | URL | Notes |
 |---------|-----|-------|
 | Web UI | http://localhost:8088 | Angular SPA served by Nginx |
+| Login page | http://localhost:8088/login | First stop if unauthenticated; guard redirects here automatically |
 | API (direct) | http://localhost:8080 | Bypasses Nginx; useful for dev/debug |
 | API Swagger | http://localhost:8080/swagger | OpenAPI explorer |
 | SEQ Logs | http://localhost:5342 | Localhost-only; not accessible from other hosts |
@@ -1145,6 +1178,15 @@ Docker must be running. Testcontainers pulls `mcr.microsoft.com/mssql/server:202
 ### E2E tests fail with `playwright.ps1 not found`
 
 Run `dotnet build tests/WebhookService.E2ETests/` first. The `playwright.ps1` script is only present after the project is built.
+
+### API returns 401 on all requests / app redirects to login immediately
+
+The API fails startup validation if `AUTH_USERNAME` or `AUTH_PASSWORD_HASH` are missing or invalid:
+
+1. Confirm both vars are set in `.env`
+2. Verify `AUTH_PASSWORD_HASH` starts with `$2` (BCrypt prefix) — plaintext passwords will be rejected
+3. Check API startup logs: `docker compose logs api` — look for `ValidateOptionsResult.Fail` messages
+4. Regenerate the hash if unsure: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'YourPassword', bcrypt.gensalt(12)).decode())"`
 
 ### Build errors after pulling updates
 

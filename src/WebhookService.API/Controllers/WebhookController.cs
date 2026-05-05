@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using WebhookService.Domain.Entities;
@@ -9,6 +10,7 @@ using WebhookService.Domain.Services;
 namespace WebhookService.API.Controllers;
 
 [ApiController]
+[AllowAnonymous]
 public sealed class WebhookController(
     IWebhookTokenRepository tokenRepository,
     IWebhookRequestRepository requestRepository,

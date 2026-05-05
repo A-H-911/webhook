@@ -60,6 +60,9 @@ services:
       Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
       Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
       Webhook__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
+      Auth__Username: "${AUTH_USERNAME}"
+      Auth__PasswordHash: "${AUTH_PASSWORD_HASH}"
+      Auth__SessionHours: "${AUTH_SESSION_HOURS:-8}"
       Cors__AllowedOrigins: ""
     depends_on:
       sqlserver:

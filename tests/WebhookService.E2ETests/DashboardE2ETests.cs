@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
@@ -9,42 +10,88 @@ namespace WebhookService.E2ETests;
 /// Full-stack E2E tests using Playwright headless Chromium.
 /// Requires the full stack running (docker compose up -d) or local dev.
 /// Set E2E_BASE_URL to target a running instance (default: http://localhost).
+/// Set E2E_AUTH_USERNAME / E2E_AUTH_PASSWORD for credentials (default: admin/admin).
 /// Before first run: pwsh bin/Debug/net10.0/playwright.ps1 install
 /// </summary>
 public sealed class DashboardE2ETests : IAsyncLifetime
 {
     private IPlaywright _playwright = null!;
     private IBrowser _browser = null!;
+    private IBrowserContext _authContext = null!;
     private HttpClient _apiClient = null!;
 
     private static string BaseUrl =>
         Environment.GetEnvironmentVariable("E2E_BASE_URL") ?? "http://localhost";
 
+    private static string AuthUsername =>
+        Environment.GetEnvironmentVariable("E2E_AUTH_USERNAME") ?? "admin";
+
+    private static string AuthPassword =>
+        Environment.GetEnvironmentVariable("E2E_AUTH_PASSWORD")
+            ?? throw new InvalidOperationException(
+                "E2E_AUTH_PASSWORD environment variable is required. " +
+                "Set it to the admin password configured in AUTH_PASSWORD_HASH.");
+
     public async Task InitializeAsync()
     {
         _playwright = await Playwright.CreateAsync();
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
-        _apiClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
+
+        // Create an authenticated browser context shared by all tests
+        _authContext = await _browser.NewContextAsync();
+        await LoginAsync(_authContext);
+
+        // Create an authenticated API client for test data setup
+        var handler = new HttpClientHandler { UseCookies = true, CookieContainer = new CookieContainer() };
+        _apiClient = new HttpClient(handler) { BaseAddress = new Uri(BaseUrl) };
+        await AuthenticateApiClientAsync();
     }
 
     public async Task DisposeAsync()
     {
         _apiClient.Dispose();
+        await _authContext.DisposeAsync();
         await _browser.DisposeAsync();
         _playwright.Dispose();
     }
 
-    private async Task<IPage> NewPageAsync()
+    private async Task LoginAsync(IBrowserContext context)
     {
-        var context = await _browser.NewContextAsync();
-        return await context.NewPageAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{BaseUrl}/login");
+        await page.FillAsync("[data-testid='username']", AuthUsername);
+        await page.FillAsync("[data-testid='password']", AuthPassword);
+        await page.ClickAsync("[data-testid='login-submit']");
+        await page.WaitForURLAsync(new Regex("/dashboard"));
+        await page.CloseAsync();
     }
+
+    private async Task AuthenticateApiClientAsync()
+    {
+        var resp = await _apiClient.PostAsJsonAsync("/api/auth/login",
+            new { username = AuthUsername, password = AuthPassword });
+        resp.EnsureSuccessStatusCode();
+    }
+
+    private async Task<IPage> NewPageAsync() => await _authContext.NewPageAsync();
 
     private async Task<(string tokenId, string webhookUrl)> CreateTokenViaApiAsync(string description = "e2e-token")
     {
         var resp = await _apiClient.PostAsJsonAsync("/api/tokens", new { description });
         var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         return (body.GetProperty("id").GetString()!, body.GetProperty("webhookUrl").GetString()!);
+    }
+
+    // --- Login page ---
+
+    [Fact]
+    public async Task Login_UnauthenticatedAccess_RedirectsToLoginPage()
+    {
+        var unauthContext = await _browser.NewContextAsync();
+        var page = await unauthContext.NewPageAsync();
+        await page.GotoAsync($"{BaseUrl}/dashboard");
+        await Assertions.Expect(page).ToHaveURLAsync(new Regex("/login"));
+        await unauthContext.DisposeAsync();
     }
 
     // --- Dashboard page ---

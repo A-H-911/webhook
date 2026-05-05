@@ -53,7 +53,7 @@ export class DashboardComponent implements OnInit {
   openCreate(): void {
     const ref = this.dialog.open(CreateTokenDialogComponent, { width: '400px' });
     ref.afterClosed().subscribe((description: string | undefined) => {
-      if (description === undefined) return;
+      if (description == null) return;
       this.tokenService.createToken(description || undefined).subscribe((token) => {
         this.tokens.update((list) => [token, ...list]);
         this.snackBar.open('Webhook URL created', 'OK', { duration: 3000 });

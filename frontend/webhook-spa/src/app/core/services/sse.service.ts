@@ -19,7 +19,7 @@ export class SseService {
 
       const open = () => {
         if (closed) return;
-        es = new EventSource(`/api/tokens/${tokenId}/sse`);
+        es = new EventSource(`/api/tokens/${tokenId}/sse`, { withCredentials: true });
 
         es.onopen = () => {
           reconnectDelay = 1000;

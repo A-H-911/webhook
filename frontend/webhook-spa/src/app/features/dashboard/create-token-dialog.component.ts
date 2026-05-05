@@ -24,7 +24,7 @@ import { MatButtonModule } from '@angular/material/button';
       </mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-button [mat-dialog-close]="null">Cancel</button>
       <button mat-flat-button color="primary" (click)="confirm()">Create</button>
     </mat-dialog-actions>
   `,

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -31,7 +31,10 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
                 ["Webhook:BaseUrl"] = "https://test.example.com",
                 ["Webhook:RetentionDays"] = "7",
                 ["Webhook:MaxRequestSizeMb"] = "5",
-                ["Cors:AllowedOrigins"] = ""
+                ["Cors:AllowedOrigins"] = "",
+                ["Auth:Username"] = "testuser",
+                ["Auth:PasswordHash"] = BCrypt.Net.BCrypt.HashPassword("testpass", workFactor: 4),
+                ["Auth:SessionHours"] = "8"
             });
         });
 
@@ -50,6 +53,9 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
                 services.Remove(sseDescriptor);
 
             services.AddSingleton<ISseNotifier, TestNullSseNotifier>();
+
+            services.AddAuthentication(defaultScheme: "Test")
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
         });
     }
 
@@ -58,19 +64,4 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
         await _db.DisposeAsync();
     }
 
-    private sealed class TestNullSseNotifier : ISseNotifier
-    {
-        public async IAsyncEnumerable<SseEvent> SubscribeAsync(
-            Guid tokenId,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            await Task.CompletedTask;
-            yield break;
-        }
-
-        public Task NotifyAsync(Guid tokenId, string summaryJson, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public void NotifyTokenDeleted(Guid tokenId) { }
-    }
 }

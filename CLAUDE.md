@@ -264,6 +264,18 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | `.AsNoTracking()` on all repository reads | Removing it enables EF Core change tracking on read-only queries; mutations in the same scope may unexpectedly persist phantom changes. |
 | `WHERE TokenId = @tokenId` in GetRequestById / ExportRequest / DeleteRequest | Removing it enables IDOR — any token holder can read or delete another token's requests. **Security regression.** |
 | Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph. |
+| `[AllowAnonymous]` on `WebhookController` | External callers never have credentials. Removing it breaks all webhook delivery. |
+| `[AllowAnonymous]` on `AuthController` | Login endpoint must be reachable before a session exists. Removing it creates an unbreakable auth loop. |
+| `.AllowAnonymous()` on both `MapHealthChecks` calls | Global fallback policy applies to minimal API endpoints too. Without this, Docker health checks return 401 and the container never becomes healthy. |
+| `OnRedirectToLogin` returns `401`, not `302` | SPA needs to intercept the 401 and navigate client-side. A `302` redirects the browser before Angular can handle it, breaking the login flow. |
+| `UseAuthentication()` before `UseAuthorization()` in middleware | ASP.NET Core enforces this order; swapping it silently breaks all authorization checks. |
+| `UseAuthentication()` after `UseForwardedHeaders()` | `ForwardedHeaders` must resolve the real proto first so `SameAsRequest` sets the `Secure` cookie flag correctly behind Nginx. |
+| `checkSession()` swallows errors in `APP_INITIALIZER` | A throw inside `APP_INITIALIZER` blocks Angular startup entirely, leaving a blank screen. |
+| Interceptor excludes `/api/auth/` from the 401→`/login` redirect | `POST /api/auth/login` returns 401 on bad credentials. Redirecting to `/login` on that 401 creates an infinite redirect loop in the login form. |
+| `EventSource({ withCredentials: true })` in `SseService` | Dev mode is cross-origin (`:4200` → `:8080`). Without `withCredentials`, the browser blocks the auth cookie and SSE gets 401 silently. |
+| `.AllowCredentials()` in the dev CORS policy | Required for cross-origin cookie delivery in dev mode. Without it, the browser discards the `Set-Cookie` header and login appears to succeed but leaves no session. |
+| `AUTH_PASSWORD_HASH` is a BCrypt hash, never plaintext | The validator checks the `$2` prefix at startup. Plaintext fails validation and the app refuses to start. |
+| `[mat-dialog-close]="null"` (with binding) on the Cancel button in `CreateTokenDialogComponent` | `mat-dialog-close` without a value binding closes with `""` (empty string), not `undefined`. The dashboard guard uses `== null`, so `""` bypasses it and silently creates a no-description token. |
 
 ---
 
@@ -282,6 +294,12 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Angular proxy 404 during `npm start` | Backend not running on port 8080 | `dotnet run --project src/WebhookService.API` first |
 | New command handler never invoked | Validator constructor throws, or handler in wrong assembly | Verify validator has at least one `RuleFor`; handler must be in Application project |
 | EF migration fails with "pending model changes" | Model changed without adding a migration | `dotnet ef migrations add <Name> --project src/WebhookService.Infrastructure --startup-project src/WebhookService.API` |
+| API exits at startup with `ValidateOptionsResult.Fail` | `AUTH_USERNAME` or `AUTH_PASSWORD_HASH` missing or hash lacks `$2` prefix | Set both vars in `.env`; regenerate hash with `python3 -c "import bcrypt; print(bcrypt.hashpw(b'pass', bcrypt.gensalt(12)).decode())"` |
+| App always redirects to `/login` even after correct credentials | `AUTH_PASSWORD_HASH` is plaintext, not a BCrypt hash | Replace with BCrypt hash; see §10 Configuration Reference in README |
+| SSE 401 in dev mode (`:4200` → `:8080`) | `withCredentials` removed from `EventSource` call in `SseService` | Restore `{ withCredentials: true }` |
+| Login succeeds but session not retained (dev cross-origin) | `.AllowCredentials()` removed from dev CORS policy | Add `.AllowCredentials()` to the CORS policy in `Program.cs` |
+| Health checks return 401 | `.AllowAnonymous()` removed from `MapHealthChecks` | Restore `.AllowAnonymous()` on both health check endpoints |
+| Clicking Cancel on "New Webhook URL" dialog creates a token | `mat-dialog-close` attribute without binding changed to `[mat-dialog-close]="null"` (reverted), or dashboard guard weakened from `== null` back to `=== undefined` | Restore `[mat-dialog-close]="null"` in `CreateTokenDialogComponent` and `== null` guard in `DashboardComponent.openCreate()` |
 
 ---
 
