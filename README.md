@@ -903,6 +903,7 @@ docker compose up -d
 
 # Step 4: Run E2E tests
 $env:E2E_BASE_URL="http://localhost:8088"
+$env:E2E_AUTH_PASSWORD="admin"  # Must match AUTH_PASSWORD (plaintext) in .env
 dotnet test tests/WebhookService.E2ETests/
 ```
 

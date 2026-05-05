@@ -240,7 +240,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Quick smoke — domain logic only | `dotnet test tests/WebhookService.UnitTests/` |
 | Full backend (requires Docker) | `dotnet test` |
 | Single test by name | `dotnet test --filter "FullyQualifiedName~<MethodName>"` |
-| E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 dotnet test tests/WebhookService.E2ETests/` |
+| E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/` |
 | Angular unit tests | `cd frontend/webhook-spa && npm test` |
 
 **Gotchas:**
