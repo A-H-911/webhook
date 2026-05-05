@@ -7,16 +7,18 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatSelectModule } from '@angular/material/select';
 import { CustomResponse, SetCustomResponseDto } from '../../core/models/token.model';
 
-type DialogResult =
-  | { action: 'save'; dto: SetCustomResponseDto }
-  | { action: 'reset' };
+type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'reset' };
 
 @Component({
   selector: 'app-custom-response-dialog',
   standalone: true,
   imports: [
-    FormsModule, MatDialogModule, MatFormFieldModule,
-    MatInputModule, MatButtonModule, MatSelectModule,
+    FormsModule,
+    MatDialogModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatButtonModule,
+    MatSelectModule,
   ],
   template: `
     <h2 mat-dialog-title>Custom Response</h2>
@@ -37,14 +39,17 @@ type DialogResult =
 
       <mat-form-field appearance="outline" style="width:100%; margin-top:8px">
         <mat-label>Response Body</mat-label>
-        <textarea matInput [(ngModel)]="body" rows="6"
-                  placeholder='{"status":"ok"}'></textarea>
+        <textarea matInput [(ngModel)]="body" rows="6" placeholder='{"status":"ok"}'></textarea>
       </mat-form-field>
 
       <mat-form-field appearance="outline" style="width:100%; margin-top:8px">
         <mat-label>Extra Headers (JSON object)</mat-label>
-        <textarea matInput [(ngModel)]="headersJson" rows="3"
-                  placeholder='{"X-Custom":"value"}'></textarea>
+        <textarea
+          matInput
+          [(ngModel)]="headersJson"
+          rows="3"
+          placeholder='{"X-Custom":"value"}'
+        ></textarea>
       </mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
@@ -68,14 +73,18 @@ export class CustomResponseDialogComponent {
   headersJson = this.data?.headers ?? '{}';
 
   save(): void {
-    let headers: Record<string, string> = {};
-    try { headers = JSON.parse(this.headersJson || '{}'); } catch { /* keep empty */ }
+    const rawHeaders = this.headersJson.trim() || '{}';
+    try {
+      JSON.parse(rawHeaders);
+    } catch {
+      return;
+    }
 
     const dto: SetCustomResponseDto = {
       statusCode: this.statusCode,
       contentType: this.contentType.trim() || 'application/json',
       body: this.body.trim() || null,
-      headers,
+      headers: rawHeaders,
     };
     this.ref.close({ action: 'save', dto } satisfies DialogResult);
   }

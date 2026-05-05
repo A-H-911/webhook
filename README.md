@@ -107,7 +107,7 @@ The request appears in the dashboard in real time.
   "statusCode": 200,
   "contentType": "application/json",
   "body": "{\"ok\": true}",
-  "headers": ""
+  "headers": "{}"
 }
 ```
 
@@ -135,7 +135,7 @@ The request appears in the dashboard in real time.
 GET /api/tokens/{tokenId}/sse
 ```
 
-Opens a Server-Sent Events stream. Emits a `new-request` event each time a webhook arrives and a `token-deleted` event when the token is soft-deleted. The initial frame includes `retry: 5000` so browsers reconnect after 5 s on disconnect.
+Opens a Server-Sent Events stream. Emits a `request` event (wire name; the Angular client maps this internally to `new-request`) each time a webhook arrives, and a `token-deleted` event when the token is soft-deleted. The initial frame includes `retry: 5000` so browsers reconnect after 5 s on disconnect.
 
 ### Webhook Receiver
 

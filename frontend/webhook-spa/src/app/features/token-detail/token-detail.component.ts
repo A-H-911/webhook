@@ -64,10 +64,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   readonly connected = signal(false);
 
   page = 1;
-  total = 0;
+  readonly total = signal(0);
   search = '';
 
-  readonly totalPages = computed(() => Math.ceil(this.total / PAGE_SIZE) || 1);
+  readonly totalPages = computed(() => Math.ceil(this.total() / PAGE_SIZE) || 1);
 
   get tokenId(): string {
     return this.route.snapshot.paramMap.get('id') ?? '';
@@ -104,7 +104,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
         } else if (event.eventType === 'new-request') {
           this.connected.set(true);
           this.requests.update((list) => [event.data, ...list]);
-          this.total++;
+          this.total.update((n) => n + 1);
         } else if (event.eventType === 'token-deleted') {
           this.snackBar.open('This webhook URL was deleted', 'OK', { duration: 4000 });
           this.router.navigate(['/dashboard']);
@@ -120,7 +120,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     this.requestService.getRequests(this.tokenId, this.page, PAGE_SIZE, this.search).subscribe({
       next: (result) => {
         this.requests.set(result.items);
-        this.total = result.total;
+        this.total.set(result.total);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -159,9 +159,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   deleteRequest(req: RequestSummary, event: MouseEvent): void {
     event.stopPropagation();
+    if (!confirm('Delete this request?')) return;
     this.requestService.deleteRequest(this.tokenId, req.id).subscribe(() => {
       this.requests.update((list) => list.filter((r) => r.id !== req.id));
-      this.total--;
+      this.total.update((n) => n - 1);
       if (this.selectedDetail()?.id === req.id) this.selectedDetail.set(null);
     });
   }
@@ -176,7 +177,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     if (!confirm('Clear all captured requests for this webhook URL?')) return;
     this.requestService.clearRequests(this.tokenId).subscribe(() => {
       this.requests.set([]);
-      this.total = 0;
+      this.total.set(0);
       this.selectedDetail.set(null);
       this.snackBar.open('All requests cleared', 'OK', { duration: 3000 });
     });
@@ -218,7 +219,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     const url = this.token()?.webhookUrl ?? '';
     navigator.clipboard
       .writeText(url)
-      .then(() => this.snackBar.open('URL copied', 'OK', { duration: 2000 }));
+      .then(() => this.snackBar.open('URL copied', 'OK', { duration: 2000 }))
+      .catch(() =>
+        this.snackBar.open('Copy failed — please copy manually', 'OK', { duration: 3000 }),
+      );
   }
 
   formatHeaders(raw: string): string {

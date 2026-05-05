@@ -23,6 +23,12 @@ public sealed class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
             _logger.LogInformation("{Handler} succeeded in {ElapsedMs}ms", name, sw.ElapsedMilliseconds);
             return response;
         }
+        catch (FluentValidation.ValidationException)
+        {
+            // Validation failures are expected client errors — log at Warning, not Error
+            _logger.LogWarning("{Handler} rejected due to validation failure in {ElapsedMs}ms", name, sw.ElapsedMilliseconds);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "{Handler} failed after {ElapsedMs}ms", name, sw.ElapsedMilliseconds);

@@ -108,9 +108,9 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         var (tokenId, _) = await CreateTokenViaApiAsync("detail-url-test");
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
 
-        var urlText = await page.InnerTextAsync("body");
+        var urlText = await page.InnerTextAsync("code.webhook-url");
         Assert.Contains("/webhook/", urlText);
     }
 
@@ -138,7 +138,7 @@ public sealed class DashboardE2ETests : IAsyncLifetime
         var (tokenId, _) = await CreateTokenViaApiAsync("delete-ui-test");
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
 
         // Wire up dialog handler BEFORE clicking — the app shows window.confirm() on delete
         page.Dialog += async (_, dialog) => await dialog.AcceptAsync();

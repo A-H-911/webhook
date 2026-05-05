@@ -12,12 +12,19 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
         {
             await next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected — normal for SSE and long-running streams; not an error.
+        }
         catch (ValidationException ex)
         {
-            context.Response.StatusCode = (int)HttpStatusCode.UnprocessableEntity;
-            context.Response.ContentType = "application/json";
-            var errors = ex.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage });
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { errors }));
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.UnprocessableEntity;
+                context.Response.ContentType = "application/json";
+                var errors = ex.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage });
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new { errors }));
+            }
         }
         catch (Exception ex)
         {
@@ -28,6 +35,9 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
 
     private static async Task WriteErrorAsync(HttpContext context)
     {
+        if (context.Response.HasStarted)
+            return;
+
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = "An unexpected error occurred." }));

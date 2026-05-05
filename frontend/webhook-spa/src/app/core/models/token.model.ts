@@ -19,5 +19,5 @@ export interface SetCustomResponseDto {
   statusCode: number;
   contentType: string;
   body: string | null;
-  headers: Record<string, string>;
+  headers: string;
 }

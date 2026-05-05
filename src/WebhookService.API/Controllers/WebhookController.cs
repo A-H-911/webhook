@@ -28,6 +28,7 @@ public sealed class WebhookController(
             return NotFound();
 
         Request.EnableBuffering();
+        Request.Body.Seek(0, SeekOrigin.Begin);
         var body = await ReadBodyAsync(ct);
 
         var request = new WebhookRequest

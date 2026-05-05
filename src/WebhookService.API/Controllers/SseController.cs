@@ -1,15 +1,23 @@
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using WebhookService.Domain.Repositories;
 using WebhookService.Domain.Services;
 
 namespace WebhookService.API.Controllers;
 
 [ApiController]
-public sealed class SseController(ISseNotifier sseNotifier) : ControllerBase
+public sealed class SseController(ISseNotifier sseNotifier, IWebhookTokenRepository tokenRepository) : ControllerBase
 {
     [HttpGet("api/tokens/{tokenId:guid}/sse")]
     public async Task Subscribe(Guid tokenId, CancellationToken ct)
     {
+        var token = await tokenRepository.GetByIdAsync(tokenId, ct);
+        if (token is null)
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
         Response.Headers.ContentType = "text/event-stream";
         Response.Headers.CacheControl = "no-cache";
         Response.Headers.Connection = "keep-alive";

@@ -15,6 +15,7 @@
 | v3 | 2026-05-04 | Hangfire removed. 6→4 Docker services. SSE notify is direct in-process call. Retention uses BackgroundService. 12→11 phases. |
 | v4 | 2026-05-04 | Second devil's advocate review — 4 new blocking + 5 high + 8 medium issues found and fixed (IP forwarding, BackgroundService crash, NullSseNotifier, body reading, CORS, port config, Host header, SSE race, options validation) |
 | v5 | 2026-05-04 | Code review complete — 22 findings fixed (route corrections, IDOR fixes, cache eviction, AsNoTracking, validation 422, SSE retry frame, nginx.conf updates, Polly retry narrowing) |
+| v6 | 2026-05-05 | Post-implementation browser + SEQ audit — 3 bugs found and fixed: GlobalExceptionMiddleware SSE disconnect crash, custom response headers type mismatch (Angular→C# contract), missing HasStarted guard on ValidationException branch |
 
 ---
 
@@ -69,6 +70,13 @@
 | MN6 | **`GetTokensQuery` filter not stated — soft-deleted tokens visible?** | Handler explicitly filters `WHERE IsActive = 1`; documented |
 | MN7 | **E2E tests require Docker Compose v2 (`--wait` flag) — not documented** | Prerequisite noted in Phase 11; `docker compose version` check in CI setup |
 | MN8 | **No local dev DB guidance for Phases 1–6** | Standalone `docker run` SQL Server command added to Phase 1 |
+
+### Post-Audit Bugs (v6 — found during live browser + SEQ audit, 2026-05-05)
+
+| # | Issue | Fix Applied |
+|---|-------|-------------|
+| PA1 | **`GlobalExceptionMiddleware` crashes on SSE client disconnect** — `OperationCanceledException` was caught by the generic `Exception` handler which called `WriteErrorAsync`, which tried to set `StatusCode` on an already-started SSE response, throwing `InvalidOperationException` | Added `catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)` silent branch; added `if (context.Response.HasStarted) return;` guard in `WriteErrorAsync`; added `HasStarted` guard on the `ValidationException` branch |
+| PA2 | **`SetCustomResponseDto.headers` type mismatch — Angular sent `Record<string,string>` object but C# API expects raw JSON `string`** — every Custom Response save returned HTTP 400; JSON deserializer failed when it encountered an object value for a `string` field | Changed `SetCustomResponseDto.headers` type from `Record<string, string>` to `string`; changed dialog `save()` to pass `rawHeaders` (the string) directly instead of `JSON.parse(headersJson)` |
 
 ---
 

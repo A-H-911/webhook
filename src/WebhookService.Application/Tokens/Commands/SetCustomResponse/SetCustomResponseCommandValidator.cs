@@ -8,8 +8,8 @@ public sealed class SetCustomResponseCommandValidator : AbstractValidator<SetCus
     public SetCustomResponseCommandValidator()
     {
         RuleFor(x => x.StatusCode)
-            .InclusiveBetween(100, 599)
-            .WithMessage("StatusCode must be a valid HTTP status code (100–599).");
+            .Must(code => (code >= 200 && code <= 299) || (code >= 400 && code <= 599))
+            .WithMessage("StatusCode must be 2xx, 4xx, or 5xx. Redirect (3xx) codes are not allowed.");
 
         RuleFor(x => x.ContentType)
             .NotEmpty()

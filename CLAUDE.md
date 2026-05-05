@@ -115,6 +115,10 @@ docker/
 
 **Angular dev proxy:** `proxy.conf.json` forwards `/api`, `/webhook`, `/health` to `http://localhost:8080`. The `ng serve` target at port 4200 uses this automatically via `angular.json`.
 
+**SSE disconnect handling:** `GlobalExceptionMiddleware` catches `OperationCanceledException` silently when `context.RequestAborted.IsCancellationRequested` is true — this is a normal SSE client disconnect, not an error. `WriteErrorAsync` guards with `if (context.Response.HasStarted) return;` because SSE responses have already flushed headers before the connection drops; attempting to set `StatusCode` on a started response throws `InvalidOperationException`. The `ValidationException` branch has the same guard.
+
+**Custom response headers contract:** `SetCustomResponseRequest.Headers` (C# API model) and `SetCustomResponseDto.headers` (Angular DTO) are typed as `string` — a raw JSON string (e.g. `"{\"X-Custom\":\"value\"}"`) — **not** a `Record<string,string>` object. The dialog validates the string with `JSON.parse` before sending but passes the raw string to the API, not the parsed object. Keep both sides in sync if either is changed.
+
 **PowerShell encoding:** When editing files in PowerShell 5.1, always use `[System.IO.File]::ReadAllText/WriteAllText` with explicit `System.Text.Encoding.UTF8`. Never use bare `Get-Content`/`Set-Content` on UTF-8 files — they silently corrupt non-ASCII characters.
 
 ## Docker Compose Services
