@@ -2,36 +2,94 @@
 
 A self-hosted webhook inspection and debugging tool. Generate unique URLs, send HTTP requests to them from any source, and inspect every captured request in real time — similar to webhook.site but running entirely on your own infrastructure.
 
-## Features
+---
 
-- **Unique webhook URLs** — create as many token URLs as you need; each is independent
-- **Real-time inspection** — live Server-Sent Events push new requests to the UI instantly
-- **Full request capture** — method, headers, body, query string, IP address, user agent, size
-- **Custom responses** — configure the status code, content type, and body each token returns to callers
-- **Search and pagination** — filter captured requests by headers or body content
-- **Export** — download any individual request as a JSON file
-- **Retention cleanup** — automatically delete requests older than a configurable number of days
-- **Structured logging** — all events streamed to SEQ for querying and alerting
-- **No authentication** — designed for trusted internal networks; auth can be layered on later
+## Table of Contents
 
-## Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | .NET 10, ASP.NET Core, Clean Architecture |
-| Frontend | Angular (latest), Angular Material |
-| Database | SQL Server 2022 |
-| Real-time | Server-Sent Events (in-process, no broker) |
-| Logging | Serilog → SEQ |
-| Container | Docker Compose |
+1. [Navigation Guide](#1-navigation-guide)
+2. [System Requirements](#2-system-requirements)
+3. [Features](#3-features)
+4. [Quick Start](#4-quick-start)
+5. [Architecture Overview (HLD)](#5-architecture-overview-hld)
+6. [Data Flows](#6-data-flows)
+7. [Low-Level Design (LLD)](#7-low-level-design-lld)
+   - [7.1 Domain Entities](#71-domain-entities)
+   - [7.2 DTOs](#72-dtos)
+   - [7.3 API Contract](#73-api-contract)
+   - [7.4 SSE Architecture](#74-sse-architecture)
+   - [7.5 Application Layer — CQRS Map](#75-application-layer--cqrs-map)
+   - [7.6 WebhookOptions & Startup Validation](#76-webhookoptions--startup-validation)
+   - [7.7 Token Cache Strategy](#77-token-cache-strategy)
+8. [Solution Structure](#8-solution-structure)
+9. [Docker Compose](#9-docker-compose)
+10. [Configuration Reference](#10-configuration-reference)
+11. [Security Model](#11-security-model)
+12. [Development Guide](#12-development-guide)
+13. [Testing](#13-testing)
+14. [Observability](#14-observability)
+15. [Contributing](#15-contributing)
+16. [Design Decisions](#16-design-decisions)
+17. [Trade-offs & Known Limitations](#17-trade-offs--known-limitations)
+18. [Future Roadmap](#18-future-roadmap)
+19. [Access Points](#19-access-points)
+20. [Troubleshooting](#20-troubleshooting)
 
 ---
 
-## Quick Start
+## 1. Navigation Guide
+
+Find what you need based on your role:
+
+| Role | Go to |
+|------|-------|
+| **Operator** — deploy and configure the stack | §4 Quick Start, §9 Docker Compose, §10 Configuration, §11 Security, §20 Troubleshooting |
+| **End User** — use the UI to inspect webhooks | §4 Quick Start, §6 Data Flows (Flows A–B), §7.3 API Contract |
+| **Developer** — build features or extend the service | §7 LLD, §8 Structure, §12 Development Guide, §13 Testing, §15 Contributing |
+| **Architect / Reviewer** — evaluate design | §5 HLD, §6 Data Flows, §7 LLD, §16 Design Decisions, §17 Trade-offs |
+
+---
+
+## 2. System Requirements
+
+| Requirement | Minimum |
+|-------------|---------|
+| Docker Engine | 24+ with Compose v2 (`docker compose version` must show v2.x) |
+| RAM | 3 GB available (SQL Server 2022 requires 2 GB alone) |
+| Disk | 5 GB free (SQL Server image ~1.5 GB; volumes grow with data) |
+| OS | Linux, macOS, or Windows with Docker Desktop |
+| Outbound internet | Required on first run to pull `mcr.microsoft.com/mssql/server:2022-latest` and `datalust/seq:latest` |
+
+For local development without Docker:
+
+| Requirement | Version |
+|-------------|---------|
+| .NET SDK | 10.0+ |
+| Node.js | 20+ |
+| Docker | For integration tests (Testcontainers pulls SQL Server automatically) |
+
+---
+
+## 3. Features
+
+- **Unique webhook URLs** — create as many token URLs as you need; each is independent
+- **Real-time inspection** — live Server-Sent Events push new requests to the UI instantly (no polling)
+- **Full request capture** — method, path, query string, headers, body, IP address, user agent, size, timestamp
+- **Binary payload support** — binary bodies are Base64-encoded and decoded transparently in the viewer
+- **Custom responses** — configure the status code, content type, headers, and body each token returns to callers
+- **Search and pagination** — filter captured requests by headers or body content; max 100 per page
+- **Export** — download any individual request as a JSON file
+- **Retention cleanup** — automatically delete requests older than a configurable number of days (BackgroundService, 24-hour cycle)
+- **Structured logging** — all events streamed to SEQ for querying and alerting
+- **SSE connection safety** — max 10 concurrent connections per token; 11th connection receives HTTP 429
+- **No authentication** — designed for trusted internal networks; see §11 Security Model
+
+---
+
+## 4. Quick Start
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose v2)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine + Compose v2
 
 ### 1. Clone and configure
 
@@ -45,12 +103,12 @@ Edit `.env`:
 
 ```env
 SA_PASSWORD=YourStr0ngP@ssword!
-WEBHOOK_BASE_URL=http://your-server-hostname-or-ip
+WEBHOOK_BASE_URL=http://your-server-hostname-or-ip:8088
 RETENTION_DAYS=7
 MAX_REQUEST_SIZE_MB=5
 ```
 
-`WEBHOOK_BASE_URL` must be the hostname or IP that external callers can reach (e.g. `http://192.168.1.10` or `https://webhooks.example.com`). The service refuses to start if this is not set.
+> `WEBHOOK_BASE_URL` is the address that **external callers** can reach — not the internal container name. For a LAN deployment use `http://192.168.1.10:8088`. The application refuses to start if this value is absent or empty.
 
 ### 2. Start the stack
 
@@ -58,19 +116,15 @@ MAX_REQUEST_SIZE_MB=5
 docker compose up -d
 ```
 
-SQL Server takes ~30 s to initialize on first boot. The API retries migrations automatically.
+SQL Server takes up to 45 s to initialize on first boot. The API automatically retries EF migrations with exponential backoff — you do not need to wait manually.
 
 ### 3. Open the UI
 
-| Service | URL |
-|---------|-----|
-| Web UI | http://localhost:8088 |
-| API (direct) | http://localhost:8080 |
-| SEQ log viewer | http://localhost:5342 |
+Navigate to **http://localhost:8088**
 
 ### 4. Create a webhook URL and send a request
 
-Click **New URL** in the dashboard. A unique URL like `http://your-server/webhook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` is generated. Send any HTTP request to it:
+Click **New URL** in the dashboard. A unique URL like `http://your-server:8088/webhook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` is generated. Send any HTTP request to it:
 
 ```bash
 curl -X POST "http://localhost:8088/webhook/<token-guid>" \
@@ -78,123 +132,655 @@ curl -X POST "http://localhost:8088/webhook/<token-guid>" \
   -d '{"event": "order.created", "orderId": 42}'
 ```
 
-The request appears in the dashboard in real time.
+The request appears in the dashboard in real time via SSE.
+
+### Shut down
+
+```bash
+docker compose down        # keeps data volumes
+docker compose down -v     # wipes all data
+```
 
 ---
 
-## API Reference
+## 5. Architecture Overview (HLD)
 
-### Tokens
+### 5.1 System Context
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/tokens` | List all active tokens |
-| `GET` | `/api/tokens/{id}` | Get a single token |
-| `POST` | `/api/tokens` | Create a new token |
-| `PUT` | `/api/tokens/{id}` | Update description or active status |
-| `DELETE` | `/api/tokens/{id}` | Soft-delete a token |
-| `PUT` | `/api/tokens/{id}/custom-response` | Set a custom response for this token |
-| `DELETE` | `/api/tokens/{id}/custom-response` | Reset to the default response |
+```
+External callers ──────────────────► ANY /webhook/{uuid}
+  (real IP forwarded via X-Forwarded-For)         │
+                               ┌──────────────────▼─────────────────────────┐
+                               │    WebhookService.API  (:8080)              │
+                               │  UseForwardedHeaders() → real IP captured   │
+                               │  Token CRUD · SSE stream · Webhook receiver │
+                               │  INSERT to DB → ISseNotifier.NotifyAsync()  │
+                               │  RetentionCleanupService (BackgroundService)│
+                               └──────┬─────────────────────────────────────┘
+                                      │
+                     ┌────────────────▼────────────────┐
+                     │  sqlserver (custom image)        │
+                     │  └── WebhookDb (tokens, requests)│
+                     └─────────────────────────────────┘
 
-**Create token:**
-```json
-{ "description": "My integration test hook" }
+  ┌──────────────────────────────┐    ┌──────────────────────────────────┐
+  │  SEQ (:5342 UI, localhost)   │    │  Nginx (:8088) + Angular SPA     │
+  │  Structured log viewer       │    │  proxies /api /webhook /health   │
+  └──────────────────────────────┘    └──────────────────────────────────┘
 ```
 
-**Set custom response:**
+**4 Docker services:** `sqlserver`, `seq`, `api`, `frontend`
+
+### 5.2 Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | .NET 10, ASP.NET Core, Clean Architecture (Domain → Application → Infrastructure → API) |
+| Frontend | Angular (latest), Angular Material, SSE via EventSource |
+| Database | SQL Server 2022 Developer Edition |
+| Real-time | Server-Sent Events (in-process, no broker) |
+| Logging | Serilog → SEQ |
+| Container | Docker Compose (4 services) |
+| Testing | xUnit + NSubstitute + FluentAssertions + Testcontainers + Playwright |
+
+---
+
+## 6. Data Flows
+
+### Flow A — Incoming Webhook Request
+
+```
+External caller: POST http://hostname:8088/webhook/{guid}
+  Headers: { Content-Type: application/json }
+  Body:    { "event": "order.created" }
+
+1. Nginx (frontend container)
+   proxy_set_header Host              $host
+   proxy_set_header X-Real-IP         $remote_addr
+   proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for
+   proxy_pass http://api:8080
+
+2. API middleware chain
+   UseForwardedHeaders() → resolves real client IP into HttpContext.Connection.RemoteIpAddress
+
+3. WebhookController
+   EnableBuffering() — makes body seekable; called first before anything else
+
+4. Read body unconditionally (no ContentLength gate — handles chunked requests correctly)
+   Binary Content-Type (image/*, application/octet-stream, etc.) → Base64-encode + IsBodyBase64=true
+   Text Content-Type → read as string, IsBodyBase64=false
+
+5. Size check: body bytes > MaxRequestSizeMb × 1024 × 1024 → 413
+
+6. Token lookup: GetOrCreateAsync(cacheKey, 60s sliding)
+   Cache miss → SELECT FROM WebhookTokens WHERE Token=@t AND IsActive=1
+   Not found  → remove key from cache (never cache null), return 404
+
+7. Capture: snapshot = { requestId, tokenId, method, path, queryString,
+                         headers(JSON), body, isBase64, contentType,
+                         ipAddress, userAgent, sizeBytes, receivedAt=UtcNow }
+
+8. INSERT WebhookRequest to WebhookDb (~2–5 ms)
+
+9. SSE notify (best-effort, error-isolated):
+   try { await sseNotifier.NotifyAsync(tokenId, summaryDto) }
+   catch { log warning — request already durable, SSE is best-effort }
+
+10. Return response:
+    CustomResponse set → configured status + headers + body
+    Not set            → 200 OK {"message": "Webhook received."}
+    Total round-trip: ~5–15 ms
+```
+
+### Flow B — View Requests in SPA (SSE Live)
+
+```
+User opens token detail page
+  → GET /api/tokens/{uuid}/requests?page=1&pageSize=20  (SummaryDto list, no body)
+  → GET /api/tokens/{uuid}/sse                          (SSE subscribe)
+      Nginx: proxy_buffering off; proxy_read_timeout 3600s
+      API: atomic connection count check → 429 if >= 10 concurrent for this token
+      First SSE frame: "retry: 5000\n\n"  (browser reconnect interval)
+      Background timer sends ": ping\n\n" every 15s (keeps Nginx proxy alive)
+  → New request arrives → event: request delivered immediately (in-process, O(1) TryWrite)
+  → User clicks row → GET /api/tokens/{uuid}/requests/{reqId}  (DetailDto with body)
+```
+
+### Flow C — Configure Custom Response
+
+```
+User configures response in dialog
+  → PUT /api/tokens/{uuid}/custom-response
+     body: { statusCode: 201, contentType: "application/json",
+             body: "{\"ok\":true}", headers: "{\"X-Custom\":\"value\"}" }
+  → SetCustomResponseCommand handler:
+      UPDATE WebhookTokens SET CustomResponse...
+      _memoryCache.Remove($"token:{token.Token}")  ← explicit cache invalidation
+  → Next incoming request uses new response immediately (cache miss forces DB read)
+```
+
+### Flow D — Token Deleted While SSE Connected
+
+```
+User deletes token
+  → DeleteTokenCommand handler:
+      soft-delete token (IsActive=false)
+      hard-delete all requests for this token
+      _memoryCache.Remove(tokenCacheKey)
+      _sseNotifier.NotifyTokenDeleted(tokenId)
+  → SseNotifier: writes "event: token-deleted\ndata: {}\n\n" to each channel
+                 then calls Channel.Writer.Complete() on each
+  → SPA EventSource receives "token-deleted" event → router.navigate(['/'])
+```
+
+### Flow E — Retention Cleanup
+
+```
+RetentionCleanupService (BackgroundService)
+  → PeriodicTimer(24h) — first tick is 24h after startup
+  → Creates a new IServiceScope per tick (avoids captive DbContext dependency)
+  → if (RetentionDays <= 0) skip — keep forever
+  → cutoff = UtcNow - RetentionDays
+  → DELETE FROM WebhookRequests WHERE ReceivedAt < cutoff
+  → log: "Retention cleanup deleted {Count} requests older than {Cutoff}"
+  → DB errors are caught and logged; service continues on next tick regardless
+```
+
+---
+
+## 7. Low-Level Design (LLD)
+
+### 7.1 Domain Entities
+
+**WebhookToken**
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `Id` | `Guid` | PK — internal |
+| `Token` | `Guid` | Unique indexed — public URL segment |
+| `Description` | `string?` | Max 200 chars |
+| `CreatedAt` | `DateTimeOffset` | UTC |
+| `IsActive` | `bool` | Soft-delete flag |
+| `CustomResponse` | `CustomResponse?` | EF Core owned entity; nullable |
+
+**CustomResponse** (owned value object, columns in `WebhookTokens` table)
+
+| Column | Type | Default |
+|--------|------|---------|
+| `StatusCode` | `int` | 200 |
+| `ContentType` | `string` | `text/plain` |
+| `Body` | `string?` | null |
+| `Headers` | `string` | `"{}"` — raw JSON string |
+
+> `CustomResponse.Headers` and the API request field `SetCustomResponseRequest.Headers` are both typed as `string` (raw JSON). The Angular dialog sends a JSON string, not a `Record<string,string>` object. Keep both sides in sync — see §16 Design Decisions (PA2).
+
+**WebhookRequest**
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `Id` | `Guid` | PK — generated by API before INSERT |
+| `TokenId` | `Guid` | FK → `WebhookToken.Id`, indexed |
+| `ReceivedAt` | `DateTimeOffset` | Indexed — retention + pagination |
+| `Method` | `string` | Max 10 |
+| `Path` | `string` | Max 2048 |
+| `QueryString` | `string?` | Max 4096 |
+| `Headers` | `string` | `NVARCHAR(MAX)` — JSON |
+| `Body` | `string?` | `NVARCHAR(MAX)` — Base64 if binary |
+| `IsBodyBase64` | `bool` | True when body is Base64-encoded |
+| `ContentType` | `string?` | Max 256 |
+| `IpAddress` | `string` | Max 45 (IPv6); real IP via `X-Forwarded-For` |
+| `UserAgent` | `string?` | Max 512 |
+| `SizeBytes` | `long` | |
+
+**Indexes:** `WebhookToken.Token` (unique), `WebhookRequest.TokenId` (non-clustered), `WebhookRequest.ReceivedAt` (non-clustered).
+
+### 7.2 DTOs
+
+**`WebhookRequestSummaryDto`** — list endpoint (no body, no headers)
+
+```
+{ Id, TokenId, Method, Path, ReceivedAt, ContentType, SizeBytes, IpAddress }
+```
+
+**`WebhookRequestDetailDto`** — single-request GET (includes body and headers)
+
+```
+{ Id, TokenId, Method, Path, QueryString, ReceivedAt, ContentType,
+  Headers (Dictionary<string,string>), Body, IsBodyBase64, SizeBytes, IpAddress, UserAgent }
+```
+
+**`WebhookTokenDto`**
+
+```
+{ Id, Token, WebhookUrl, Description, CreatedAt, IsActive, CustomResponse? }
+```
+
+**`PagedResult<T>`**
+
+```
+{ Items: T[], Page: int, PageSize: int, Total: int }
+```
+
+### 7.3 API Contract
+
+#### Token Management
+
+| Method | Path | Request Body | Response | Notes |
+|--------|------|--------------|----------|-------|
+| `GET` | `/api/tokens` | — | `200 WebhookTokenDto[]` | Active tokens only |
+| `GET` | `/api/tokens/{id}` | — | `200 WebhookTokenDto` / `404` | |
+| `POST` | `/api/tokens` | `{ description?: string }` | `201 WebhookTokenDto` | `webhookUrl` uses `WEBHOOK_BASE_URL` |
+| `PUT` | `/api/tokens/{id}` | `{ description?: string, isActive: bool }` | `200 WebhookTokenDto` / `404` | Update description or reactivate |
+| `DELETE` | `/api/tokens/{id}` | — | `204` / `404` | Soft-delete + hard-delete all requests |
+| `PUT` | `/api/tokens/{id}/custom-response` | `{ statusCode, contentType, body?, headers }` | `204` / `404` | `headers` is a raw JSON string |
+| `DELETE` | `/api/tokens/{id}/custom-response` | — | `204` / `404` | Resets to 200 OK defaults |
+
+#### Request Management
+
+| Method | Path | Response | Notes |
+|--------|------|----------|-------|
+| `GET` | `/api/tokens/{tokenId}/requests` | `200 PagedResult<SummaryDto>` | `?page=1&pageSize=20&search=foo`; max pageSize 100; `422` if invalid |
+| `GET` | `/api/tokens/{tokenId}/requests/{id}` | `200 DetailDto` / `404` | Full body + headers |
+| `GET` | `/api/tokens/{tokenId}/requests/{id}/export` | `200 application/json` / `404` | `Content-Disposition: attachment; filename="request-{id}.json"` |
+| `DELETE` | `/api/tokens/{tokenId}/requests` | `204` | Clear all requests for token |
+| `DELETE` | `/api/tokens/{tokenId}/requests/{id}` | `204` / `404` | |
+
+#### Webhook Receiver
+
+| Method | Path | Response | Notes |
+|--------|------|----------|-------|
+| `ANY` | `/webhook/{token:guid}` | Custom or `200 {"message":"Webhook received."}` | Accepts all HTTP methods |
+
+#### SSE Stream
+
+| Method | Path | Response |
+|--------|------|----------|
+| `GET` | `/api/tokens/{tokenId}/sse` | `200 text/event-stream` / `429` if ≥ 10 concurrent |
+
+**SSE event shapes:**
+
+```
+retry: 5000
+
+event: request
+data: {"id":"...","method":"POST","path":"/webhook/...","receivedAt":"...","sizeBytes":...}
+
+event: token-deleted
+data: {}
+
+: ping
+```
+
+> **Wire vs internal names:** The backend emits `event: request`. The Angular `SseService` listens via `es.addEventListener('request', handler)` and maps internally to `{ eventType: 'new-request' }`. The wire name `request` must never be renamed — doing so silently breaks real-time updates.
+
+#### Validation Errors
+
+All input validation failures return **HTTP 422** (not 400):
+
 ```json
 {
-  "statusCode": 200,
-  "contentType": "application/json",
-  "body": "{\"ok\": true}",
-  "headers": "{}"
+  "errors": [
+    { "field": "pageSize", "message": "'pageSize' must be less than or equal to 100." }
+  ]
 }
 ```
 
-### Captured Requests
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/tokens/{tokenId}/requests` | List requests (paginated) |
-| `GET` | `/api/tokens/{tokenId}/requests/{id}` | Get a single request with full body |
-| `GET` | `/api/tokens/{tokenId}/requests/{id}/export` | Download request as JSON file |
-| `DELETE` | `/api/tokens/{tokenId}/requests` | Delete all requests for a token |
-| `DELETE` | `/api/tokens/{tokenId}/requests/{id}` | Delete a single request |
-
-**List query parameters:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `page` | `1` | Page number (1-based) |
-| `pageSize` | `20` | Results per page (max 100) |
-| `search` | — | Filter by headers or body content |
-
-### Real-Time (SSE)
+### 7.4 SSE Architecture
 
 ```
-GET /api/tokens/{tokenId}/sse
+SseNotifier (singleton)
+  ConcurrentDictionary<tokenId, ConcurrentDictionary<channelId, Channel<SseEvent>>>
+  │
+  ├── SubscribeAsync(tokenId, ct):
+  │     lock(perTokenLock): if count >= 10 → throw TooManyConnectionsException → 429
+  │     channelId = Guid.NewGuid()
+  │     create bounded Channel<SseEvent>(capacity: 50)
+  │     add to inner dict
+  │     yield return each event from channel reader
+  │     on cancellation → remove channel from dict
+  │
+  ├── NotifyAsync(tokenId, dto):
+  │     foreach channel in tokenId's inner dict
+  │       channel.Writer.TryWrite(...)  ← O(1), non-blocking
+  │       silently drops if buffer full (request is already persisted in DB)
+  │
+  └── NotifyTokenDeleted(tokenId):
+        write SseEvent("token-deleted", "{}") to each channel
+        Channel.Writer.Complete() on each
+        remove tokenId from outer dict
 ```
 
-Opens a Server-Sent Events stream. Emits a `request` event (wire name; the Angular client maps this internally to `new-request`) each time a webhook arrives, and a `token-deleted` event when the token is soft-deleted. The initial frame includes `retry: 5000` so browsers reconnect after 5 s on disconnect.
+`NullSseNotifier` (no-op) is available for test substitution.
 
-### Webhook Receiver
+### 7.5 Application Layer — CQRS Map
+
+**Token Commands**
+
+| Command | Effect | Cache |
+|---------|--------|-------|
+| `CreateTokenCommand` | INSERT WebhookToken | — |
+| `UpdateTokenCommand` | UPDATE description / IsActive | — |
+| `DeleteTokenCommand` | Soft-delete + hard-delete requests + `NotifyTokenDeleted` | `Remove()` |
+| `SetCustomResponseCommand` | UPDATE CustomResponse columns | `Remove()` |
+| `ResetCustomResponseCommand` | Clear CustomResponse columns | `Remove()` |
+
+**Request Commands**
+
+| Command | Effect |
+|---------|--------|
+| `DeleteRequestCommand` | DELETE single request (verifies TokenId ownership) |
+| `ClearRequestsCommand` | DELETE all requests for token |
+
+**Token Queries**
+
+| Query | Returns | Notes |
+|-------|---------|-------|
+| `GetTokensQuery` | `WebhookTokenDto[]` | `WHERE IsActive = 1` only |
+| `GetTokenQuery` | `WebhookTokenDto?` | Returns null if inactive |
+
+**Request Queries**
+
+| Query | Returns | Notes |
+|-------|---------|-------|
+| `GetRequestsQuery` | `PagedResult<SummaryDto>` | LIKE search on Headers+Body; ownership check |
+| `GetRequestByIdQuery` | `DetailDto?` | Full body; IDOR ownership check |
+| `ExportRequestQuery` | `byte[]?` | JSON bytes; IDOR ownership check |
+
+**Pipeline Behaviors (run on every command/query)**
+
+| Behavior | What it does |
+|----------|-------------|
+| `LoggingBehavior` | Logs handler name + duration; never logs payloads |
+| `ValidationBehavior` | Runs FluentValidation; throws `ValidationException` → 422 |
+
+### 7.6 WebhookOptions & Startup Validation
 
 ```
-ANY /webhook/{token-guid}
+WebhookOptions:
+  BaseUrl        — REQUIRED, no fallback; app fails to start if absent/empty
+  RetentionDays  — default 7; range 0–365; 0 = keep forever
+  MaxRequestSizeMb — default 5; range 1–100
 ```
 
-Accepts **any HTTP method** and any content type. Returns `200 OK {"message": "Webhook received."}` by default, or the configured custom response. All request data is captured synchronously before responding.
+Validated at startup via `IValidateOptions<WebhookOptions>` with `.ValidateOnStart()`. The application throws and refuses to start if any value is invalid. There is no silent misconfiguration.
 
-### Health Checks
+### 7.7 Token Cache Strategy
 
-| Path | Description |
-|------|-------------|
-| `GET /health/live` | Liveness: always 200 if the process is up |
-| `GET /health/ready` | Readiness: checks SQL Server connectivity |
+- `GetOrCreateAsync` with 60-second sliding expiration prevents cache stampede
+- **Null and inactive tokens are never cached** — the cache key is explicitly removed when token is not found or `IsActive = false`
+- All mutations call `_memoryCache.Remove($"token:{token.Token}")`:
+  - `SetCustomResponseCommand`
+  - `ResetCustomResponseCommand`
+  - `DeleteTokenCommand`
 
 ---
 
-## Configuration
+## 8. Solution Structure
 
-All configuration uses environment variables. The API will not start if `WEBHOOK_BASE_URL` is missing or `MaxRequestSizeMb` / `RetentionDays` are out of their valid ranges.
+```
+WebhookService.sln
+│
+├── src/
+│   ├── WebhookService.Domain/
+│   │   ├── Entities/
+│   │   │   ├── WebhookToken.cs
+│   │   │   └── WebhookRequest.cs
+│   │   ├── ValueObjects/
+│   │   │   └── CustomResponse.cs
+│   │   ├── Repositories/
+│   │   │   ├── IWebhookTokenRepository.cs
+│   │   │   └── IWebhookRequestRepository.cs    ← includes DeleteOlderThanAsync
+│   │   └── Services/
+│   │       ├── ISseNotifier.cs
+│   │       └── SseEvent.cs                     ← record SseEvent(string EventName, string Data)
+│   │
+│   ├── WebhookService.Application/
+│   │   ├── Tokens/Commands/
+│   │   │   ├── CreateToken/
+│   │   │   ├── UpdateToken/                    ← description + isActive
+│   │   │   ├── DeleteToken/                    ← soft-delete + hard-delete + cache + SSE notify
+│   │   │   ├── SetCustomResponse/              ← UPDATE + cache invalidate
+│   │   │   └── ResetCustomResponse/            ← clear + cache invalidate
+│   │   ├── Tokens/Queries/
+│   │   │   ├── GetTokens/                      ← WHERE IsActive=1 only
+│   │   │   └── GetToken/                       ← returns null if inactive
+│   │   ├── Requests/Commands/
+│   │   │   ├── DeleteRequest/
+│   │   │   └── ClearRequests/
+│   │   ├── Requests/Queries/
+│   │   │   ├── GetRequests/                    ← PagedResult<SummaryDto>; LIKE search; pageSize≤100
+│   │   │   ├── GetRequestById/                 ← DetailDto with body; IDOR check
+│   │   │   └── ExportRequest/                  ← JSON bytes; IDOR check
+│   │   ├── Common/Behaviors/
+│   │   │   ├── LoggingBehavior.cs              ← name + duration only; no payload logging
+│   │   │   └── ValidationBehavior.cs           ← FluentValidation → 422
+│   │   ├── Common/DTOs/
+│   │   │   ├── WebhookTokenDto.cs
+│   │   │   ├── WebhookRequestSummaryDto.cs
+│   │   │   └── WebhookRequestDetailDto.cs
+│   │   ├── Common/Models/
+│   │   │   └── PagedResult.cs
+│   │   ├── Options/
+│   │   │   ├── WebhookOptions.cs
+│   │   │   └── WebhookOptionsValidator.cs      ← IValidateOptions; ValidateOnStart
+│   │   └── DependencyInjection.cs
+│   │
+│   ├── WebhookService.Infrastructure/
+│   │   ├── Persistence/
+│   │   │   ├── ApplicationDbContext.cs
+│   │   │   ├── Configurations/
+│   │   │   │   ├── WebhookTokenConfiguration.cs    ← owned entity; column lengths; indexes
+│   │   │   │   └── WebhookRequestConfiguration.cs  ← Path max 2048, QueryString max 4096
+│   │   │   ├── Repositories/
+│   │   │   │   ├── WebhookTokenRepository.cs       ← AsNoTracking on all reads
+│   │   │   │   └── WebhookRequestRepository.cs     ← AsNoTracking; DeleteOlderThanAsync
+│   │   │   └── Migrations/
+│   │   ├── BackgroundServices/
+│   │   │   └── RetentionCleanupService.cs      ← IServiceScopeFactory; try/catch; PeriodicTimer(24h)
+│   │   ├── Sse/
+│   │   │   ├── NullSseNotifier.cs              ← no-op; used in tests
+│   │   │   └── SseNotifier.cs                  ← ConcurrentDictionary; atomic count; bounded channels
+│   │   └── DependencyInjection.cs
+│   │
+│   └── WebhookService.API/
+│       ├── Controllers/
+│       │   ├── TokensController.cs
+│       │   ├── RequestsController.cs
+│       │   ├── WebhookController.cs            ← EnableBuffering; body reading; SSE notify
+│       │   └── SseController.cs                ← atomic connection check; SSE loop; ping timer
+│       ├── Middleware/
+│       │   └── GlobalExceptionMiddleware.cs    ← ProblemDetails; 422 for ValidationException
+│       └── Program.cs                          ← ForwardedHeaders; Kestrel limit; CORS; Polly migrations
+│
+├── tests/
+│   ├── WebhookService.UnitTests/
+│   ├── WebhookService.IntegrationTests/
+│   └── WebhookService.E2ETests/
+│       └── Fixtures/
+│           └── DockerComposeFixture.cs         ← GlobalSetup/Teardown; waits for health checks
+│
+├── frontend/
+│   └── webhook-spa/src/app/
+│       ├── core/
+│       │   ├── models/                  ← token.model.ts, request-summary.model.ts, request-detail.model.ts
+│       │   ├── services/                ← token.service.ts, request.service.ts, sse.service.ts
+│       │   └── interceptors/            ← http-error.interceptor.ts
+│       ├── features/
+│       │   ├── dashboard/               ← token list + create
+│       │   ├── token-detail/            ← split view: SSE-live request list + detail panel
+│       │   └── custom-response/         ← dialog component
+│       └── shared/
+│           ├── copy-button.component.ts
+│           ├── search-bar.component.ts  ← 300ms debounce; resets page to 1
+│           ├── body-viewer.component.ts ← JSON pretty-print; Base64 decode
+│           └── sse-status.component.ts  ← green/red dot
+│
+├── docker/
+│   ├── frontend/
+│   │   ├── Dockerfile                   ← multi-stage: Node build → Nginx Alpine
+│   │   └── nginx.conf
+│   └── sqlserver/
+│       ├── Dockerfile                   ← wraps official image; adds entrypoint.sh
+│       ├── entrypoint.sh                ← polls until SQL Server ready, then runs init.sql
+│       └── init.sql                     ← CREATE DATABASE WebhookDb IF NOT EXISTS
+│
+├── Dockerfile                           ← API: multi-stage .NET SDK → ASP.NET 10 runtime
+├── docker-compose.yml
+├── docker-compose.override.yml          ← local dev: CORS for :4200, BaseUrl for :8088
+└── .env.example
+```
+
+**Dependency direction:** `API → Application → Domain` and `Infrastructure → Domain`. Domain has zero external dependencies.
+
+---
+
+## 9. Docker Compose
+
+### Services
+
+| Service | Image | External Port | Purpose |
+|---------|-------|--------------|---------|
+| `sqlserver` | Custom (`docker/sqlserver/Dockerfile`) | `1433` | WebhookDb (SQL Server 2022 Developer) |
+| `seq` | `datalust/seq:latest` | `127.0.0.1:5341` (ingest), `127.0.0.1:5342` (UI) | Structured logs — **localhost-only** |
+| `api` | Custom (`./Dockerfile`) | `8080` | ASP.NET Core API + BackgroundService |
+| `frontend` | Custom (`docker/frontend/Dockerfile`) | `8088` | Nginx — Angular SPA + reverse proxy |
+
+> SEQ ports are bound to `127.0.0.1` and are inaccessible from external hosts by design. Access SEQ at `http://localhost:5342`.
+
+### MSSQL Custom Image
+
+The official SQL Server image does not reliably support schema initialization via environment variables. This project uses a custom image:
+
+- `docker/sqlserver/Dockerfile` — wraps `mcr.microsoft.com/mssql/server:2022-latest`
+- `docker/sqlserver/entrypoint.sh` — starts `sqlservr` in background, polls with `sqlcmd SELECT 1` until ready (~10–45 s), then executes `init.sql`
+- `docker/sqlserver/init.sql` — `CREATE DATABASE WebhookDb IF NOT EXISTS`
+
+### Nginx Configuration (`docker/frontend/nginx.conf`)
+
+Key directives:
+
+```nginx
+# SSE stream — no buffering, long timeout
+location ~ ^/api/tokens/[^/]+/sse$ {
+    proxy_pass            http://api:8080;
+    proxy_http_version    1.1;
+    proxy_set_header      Connection "";
+    proxy_buffering       off;
+    proxy_cache           off;
+    chunked_transfer_encoding on;
+    proxy_read_timeout    3600s;
+}
+
+location /api/     { proxy_pass http://api:8080; }
+location /webhook/ { proxy_pass http://api:8080; }
+location /health   { proxy_pass http://api:8080; }
+
+location / {
+    root      /usr/share/nginx/html;
+    index     index.html;
+    try_files $uri $uri/ /index.html;
+}
+```
+
+All proxy locations pass: `Host $host`, `X-Real-IP $remote_addr`, `X-Forwarded-For $proxy_add_x_forwarded_for`, `X-Forwarded-Proto $scheme`.
+
+### Development Override (`docker-compose.override.yml`)
+
+```yaml
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+      Cors__AllowedOrigins:   "http://localhost:4200"
+      Webhook__BaseUrl:       "http://localhost:8088"
+  sqlserver:
+    ports:
+      - "1433:1433"
+```
+
+Use with: `docker compose -f docker-compose.yml -f docker-compose.override.yml up -d`
+
+---
+
+## 10. Configuration Reference
+
+All configuration is via environment variables.
 
 | Variable | Required | Default | Valid Range | Description |
 |----------|----------|---------|-------------|-------------|
-| `SA_PASSWORD` | Yes | — | — | SQL Server SA password |
-| `WEBHOOK_BASE_URL` | Yes | — | Any non-empty string | Base URL for generated webhook URLs |
-| `RETENTION_DAYS` | No | `7` | 0–365 | Days to keep requests (0 = keep forever) |
-| `MAX_REQUEST_SIZE_MB` | No | `5` | 1–100 | Max accepted request body size |
-| `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty to disable CORS entirely |
+| `SA_PASSWORD` | **Yes** | — | Strong password | SQL Server SA password |
+| `WEBHOOK_BASE_URL` | **Yes** | — | Any non-empty URL | Base URL for generated webhook URLs (e.g. `http://192.168.1.10:8088`) |
+| `RETENTION_DAYS` | No | `7` | 0–365 | Days to keep requests; `0` = keep forever |
+| `MAX_REQUEST_SIZE_MB` | No | `5` | 1–100 | Max accepted request body size in MB |
+| `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
+
+**Startup validation:** The API process exits immediately at startup if `WEBHOOK_BASE_URL` is missing/empty, or if `MAX_REQUEST_SIZE_MB` or `RETENTION_DAYS` are outside their valid ranges. Silent misconfiguration is worse than a fast failure.
 
 ---
 
-## Development
+## 11. Security Model
+
+### No Authentication — By Design
+
+This service has no authentication layer. It is designed for trusted internal networks (LAN, VPN, private subnet). Anyone who can reach the port can:
+
+- Create and delete webhook tokens
+- View all captured requests (including potentially sensitive request bodies)
+- Configure custom responses
+
+**Deployment recommendations:**
+
+- Bind the service to a non-public network interface, or place it behind a VPN
+- Use firewall rules to restrict access to trusted IP ranges
+- Do not expose port 8088 to the public internet
+- SEQ (port 5342) is already `127.0.0.1`-bound — keep it that way
+
+**To add authentication:** JWT middleware + `[Authorize]` on all API controllers. The Domain and Application layers have no auth dependencies. See §18 Future Roadmap.
+
+### Stored Data
+
+Captured request data may include full headers (potentially `Authorization`, `Cookie`, API keys), full request bodies (potentially PII or credentials), and caller IP addresses. Apply your organization's data retention and access control policies accordingly. The `RETENTION_DAYS` variable controls automatic cleanup.
+
+---
+
+## 12. Development Guide
 
 ### Backend
 
-**Requirements:** .NET 10 SDK, Docker
+**Requirements:** .NET 10 SDK, Docker (for integration tests)
 
 ```bash
-# Start a local SQL Server
+# Start a local SQL Server (for development without full Docker Compose)
 docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=Dev@12345!" \
   -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
 
-# Run the API (set BaseUrl and connection string in appsettings.Development.json first)
+# Build entire solution
+dotnet build
+
+# Format all C# files
+dotnet format
+
+# Run unit tests only (no Docker needed)
+dotnet test tests/WebhookService.UnitTests/
+
+# Run the API (configure appsettings.Development.json first)
 dotnet run --project src/WebhookService.API
 ```
 
-Useful backend commands:
+### Add an EF Core Migration
 
 ```bash
-dotnet build                            # build entire solution
-dotnet format                           # format all C# files
-dotnet test tests/WebhookService.UnitTests/  # unit tests only (no Docker needed)
+dotnet ef migrations add <MigrationName> \
+  --project src/WebhookService.Infrastructure \
+  --startup-project src/WebhookService.API
 
-# Apply EF Core migrations manually
+# Apply to local database
 dotnet ef database update \
   --project src/WebhookService.Infrastructure \
   --startup-project src/WebhookService.API
 ```
+
+In production (Docker), migrations are applied automatically at startup via Polly retry (5 attempts, exponential backoff, skips `OperationCanceledException`).
 
 ### Frontend
 
@@ -202,160 +788,353 @@ dotnet ef database update \
 
 ```bash
 cd frontend/webhook-spa
+
 npm install
-npm start         # dev server at :4200, proxies /api /webhook /health → :8080
-npm run build     # production build
-npm test          # unit tests (Vitest)
+
+# Dev server at :4200 — proxies /api /webhook /health → localhost:8080
+npm start
+
+# Production build
+npm run build
+
+# Unit tests
+npm test
 ```
 
-### Full-stack dev with Docker + Angular hot-reload
+The `proxy.conf.json` forwards to `http://localhost:8080` automatically. The .NET API must be running before starting `ng serve`.
+
+### Full-Stack Development (Docker + Angular hot-reload)
 
 ```bash
+# Start backend containers with CORS enabled for :4200
 docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+
+# Run Angular dev server (SSE connects through proxy.conf.json → API at :8080)
+cd frontend/webhook-spa && npm start
 ```
 
-The override adds `http://localhost:4200` to the API's CORS allowed origins so the Angular dev server can reach the API directly.
+### Upgrading an Existing Deployment
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+```
+
+EF migrations run automatically at API startup — no manual DB steps. Data volumes persist across restarts. To also wipe data: `docker compose down -v`.
 
 ---
 
-## Testing
+## 13. Testing
 
-### Unit tests — no dependencies required
+### Unit Tests — No Dependencies
 
 ```bash
 dotnet test tests/WebhookService.UnitTests/
 ```
 
-Tests cover domain entity invariants and value object behaviour.
+Covers domain entity invariants, CQRS handler logic, SSE notifier behaviour (11th connection throws, `token-deleted` completes channels), and `RetentionCleanupService` (DB errors do not stop the timer).
 
-### Integration tests — requires Docker
+### Integration Tests — Requires Docker
 
-Testcontainers pulls a real SQL Server container automatically. Docker must be running.
+Testcontainers pulls `mcr.microsoft.com/mssql/server:2022-latest` automatically. Docker must be running.
 
 ```bash
 dotnet test tests/WebhookService.IntegrationTests/
 ```
 
-Covers all API endpoints, pagination, search, IDOR ownership checks, and validation error responses (HTTP 422).
+Covers all API endpoints, pagination, LIKE search, IDOR ownership checks, chunked body capture, SSE limits, and health checks. Uses `WebApplicationFactory<Program>` + real SQL Server container. SSE is stubbed with `TestNullSseNotifier` — the real in-process notifier is not suited for isolated test assertions because it requires live SSE subscribers.
 
-### E2E tests — requires the full stack running
+### E2E Tests — Full Stack Required
 
 ```bash
-# Install Playwright browsers (first run only)
+# Step 1: Build (required — playwright.ps1 only exists after build)
+dotnet build tests/WebhookService.E2ETests/
+
+# Step 2: Install Playwright browsers (first run only)
 pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
-# Run against the Docker Compose stack
-E2E_BASE_URL=http://localhost:8088 dotnet test tests/WebhookService.E2ETests/
+# Step 3: Ensure Docker Compose stack is running
+docker compose up -d
+
+# Step 4: Run E2E tests
+$env:E2E_BASE_URL="http://localhost:8088"
+dotnet test tests/WebhookService.E2ETests/
 ```
 
-Covers dashboard load, token creation, real-time appearance in the list, and navigation to the token detail page.
+Covers: dashboard load, token creation, real-time SSE appearance, SSE status indicator, custom response configuration, request export, and token deletion with navigation.
 
-### Run all tests
+### Run All Tests
 
 ```bash
 dotnet test
 ```
 
----
-
-## Project Structure
-
-```
-src/
-  WebhookService.Domain/           # Entities, value objects, repository interfaces, ISseNotifier
-  WebhookService.Application/      # CQRS handlers (MediatR), DTOs, FluentValidation, pipeline behaviors
-  WebhookService.Infrastructure/   # EF Core (SQL Server), SseNotifier, RetentionCleanupService
-  WebhookService.API/              # Controllers, middleware, Program.cs
-
-frontend/webhook-spa/              # Angular standalone components, Angular Material
-
-tests/
-  WebhookService.UnitTests/        # xUnit, domain tests, no infrastructure
-  WebhookService.IntegrationTests/ # xUnit, Testcontainers.MsSql, WebApplicationFactory
-  WebhookService.E2ETests/         # Playwright, headless Chromium
-
-docker/
-  sqlserver/                       # SQL Server image with polling entrypoint + init.sql
-  frontend/                        # Nginx multi-stage Dockerfile + nginx.conf
-```
-
-### Architecture
-
-The backend follows **Clean Architecture** — dependencies point inward only:
-
-```
-API  ──▶  Application  ──▶  Domain
-Infrastructure  ──────────▶  Domain
-```
-
-- **Domain** — pure C# entities and interfaces, no framework dependencies
-- **Application** — CQRS with MediatR; each command/query has its own handler; validation runs as a pipeline behavior (returns HTTP 422 on failure)
-- **Infrastructure** — EF Core DbContext, repository implementations, in-process SSE notifier, retention background service
-- **API** — thin controllers mapping HTTP to MediatR; global exception middleware; health checks
-
-### SSE architecture
-
-Real-time push is handled in-process using `ConcurrentDictionary<Guid, List<Channel<SseEvent>>>`. Each SSE connection is a bounded channel (capacity 100, drop-oldest strategy). No Redis or external message broker is required. Maximum 10 concurrent SSE connections per token; additional connections receive HTTP 429.
+Running all tests requires Docker (integration) and the stack running with `E2E_BASE_URL` set (E2E). Run suites individually during development for faster feedback.
 
 ---
 
-## Docker Services
+## 14. Observability
 
-| Service | Port(s) | Notes |
-|---------|---------|-------|
-| `frontend` | `8088→80` | Nginx serves Angular SPA; reverse-proxies `/api`, `/webhook`, `/health` to the API container |
-| `api` | `8080→8080` | ASP.NET Core; applies EF migrations on startup with exponential-backoff retry |
-| `sqlserver` | `1433→1433` | SQL Server 2022 Developer edition; polling entrypoint runs `init.sql` once ready |
-| `seq` | `5341` (ingest), `5342→80` (UI) | Structured log viewer; no auth in default config |
+Structured logs are emitted via **Serilog** and forwarded to **SEQ** at `http://localhost:5342`.
 
-Data survives `docker compose down` via named volumes. To wipe all data:
-
-```bash
-docker compose down -v
-```
-
----
-
-## Observability
-
-Structured logs are emitted via **Serilog** and forwarded to **SEQ** at http://localhost:5342.
-
-Key log events:
-
-| Event | Level | Properties |
-|-------|-------|-----------|
+| Event | Level | Structured Properties |
+|-------|-------|----------------------|
 | Webhook received | Information | `TokenId`, `Method`, `Path`, `IpAddress`, `SizeBytes` |
 | SSE notification failed | Warning | `TokenId`, exception message |
 | Retention cleanup ran | Information | `DeletedCount`, `CutoffDate` |
-| MediatR request handled | Information | `RequestType`, `Duration` |
+| MediatR handler completed | Information | `RequestType`, `DurationMs` |
 | Validation failure | Warning | `RequestType`, field-level errors |
-| Startup migration retry | Warning | attempt number, elapsed time |
+| Startup migration retry | Warning | attempt number, delay seconds |
+| SSE client disconnected | (silent) | `OperationCanceledException` when `RequestAborted` is true — not logged as error |
+
+**Useful SEQ queries:**
+
+```
+# All activity for a specific token
+TokenId = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# All slow handlers (>100ms)
+DurationMs > 100
+
+# Retention cleanup history
+@Message like 'Retention cleanup%'
+```
 
 ---
 
-## Troubleshooting
+## 15. Contributing
 
-**SQL Server container is unhealthy after startup**
+### Branch Strategy
 
-SQL Server takes up to 45 s to initialize on first boot. The API retries migrations automatically. Check logs if it still fails:
+- `main` — always deployable
+- Feature branches: `feat/<short-description>`
+- Bug fix branches: `fix/<short-description>`
+
+### Commit Format
+
+```
+<type>: <description>
+
+<optional body>
+```
+
+Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
+
+### Adding a New CQRS Command
+
+1. Create `src/WebhookService.Application/<Feature>/Commands/<Name>/`
+2. Add `<Name>Command.cs` (record implementing `IRequest<T>`)
+3. Add `<Name>CommandHandler.cs` (implementing `IRequestHandler`)
+4. Add `<Name>CommandValidator.cs` (`AbstractValidator<T>`)
+5. Add a controller action — MediatR auto-discovers handlers via assembly scanning
+6. Add unit tests in `tests/WebhookService.UnitTests/Application/`
+
+### Adding a New EF Core Migration
+
+```bash
+dotnet ef migrations add <Name> \
+  --project src/WebhookService.Infrastructure \
+  --startup-project src/WebhookService.API
+```
+
+Review the generated migration before committing. Destructive changes (column drops, renames) need manual data safety review.
+
+### PR Checklist
+
+- [ ] `dotnet build` passes with 0 errors
+- [ ] `dotnet format` applied
+- [ ] Unit tests added/updated and passing
+- [ ] If touching API contract: §7.3 table updated
+- [ ] If adding an env var: §10 Configuration Reference updated
+- [ ] If changing SSE wire name or `headers` contract type: §7.3 and §16 PA2 note updated
+- [ ] No secrets, credentials, or PII in committed files
+- [ ] `docker compose up -d` boots clean
+
+---
+
+## 16. Design Decisions
+
+### 16.1 Confirmed Decisions
+
+| # | Topic | Decision |
+|---|-------|----------|
+| 1 | Real-time delivery | SSE (one-way push per token stream) — no WebSocket, no polling |
+| 2 | Data retention | Configurable via `RETENTION_DAYS`; `BackgroundService` cleans daily |
+| 3 | Custom response | Static per token (status + headers + body) |
+| 4 | Request replay | Not supported — capture and inspect only |
+| 5 | Token format | UUID — `/webhook/{guid}` |
+| 6 | URL grouping | Flat list — no grouping |
+| 7 | Search | `LIKE '%term%'` on headers + body; max `pageSize=100` |
+| 8 | Request size limit | Configurable via `MAX_REQUEST_SIZE_MB`; enforced in Kestrel |
+| 9 | Export | JSON per-request download |
+| 10 | Background jobs | No Hangfire — `BackgroundService` + `PeriodicTimer(24h)` |
+| 11 | SSE notify | Direct in-process call; best-effort; wrapped in try/catch |
+| 12 | Database | Single `WebhookDb` on SQL Server 2022 Developer Edition |
+| 13 | SEQ | Container in docker-compose; ports bound to `127.0.0.1` |
+| 14 | MSSQL init | Custom Docker image with `entrypoint.sh` + `sqlcmd` polling loop |
+| 15 | Scale target | < 100 webhook URLs, small team, single API instance |
+| 16 | Frontend | Separate Nginx container serving Angular build |
+| 17 | Testing | Unit + Integration (Testcontainers) + E2E (Playwright) |
+| 18 | Redis | Future upgrade for multi-instance SSE; `ISseNotifier` interface unchanged |
+| 19 | Binary payloads | Base64-encoded; `IsBodyBase64` flag; ~33% storage overhead |
+| 20 | SSE notify timing | `TryWrite` to bounded Channel — O(1), non-blocking |
+| 21 | IP capture | `UseForwardedHeaders()` in pipeline; Nginx passes `X-Real-IP` + `X-Forwarded-For` |
+| 22 | `WebhookOptions` | Validated at startup via `IValidateOptions`; fail-fast on invalid config |
+
+### 16.2 Revision History
+
+| Version | Date | Summary |
+|---------|------|---------|
+| v1 | 2026-05-04 | Initial plan |
+| v2 | 2026-05-04 | Devil's advocate review — 5 blocking + 5 high + 8 medium issues fixed |
+| v3 | 2026-05-04 | Hangfire removed; 6→4 Docker services; SSE notify is direct in-process; BackgroundService for retention |
+| v4 | 2026-05-04 | Second review — IP forwarding, BackgroundService crash guard, NullSseNotifier, body reading, CORS, ports, Host header, SSE race condition, options validation |
+| v5 | 2026-05-04 | Code review — route corrections, IDOR fixes, cache eviction, AsNoTracking, 422 validation, SSE retry frame, nginx updates, Polly retry narrowing |
+| v6 | 2026-05-05 | Browser + SEQ audit — 3 bugs fixed: GlobalExceptionMiddleware SSE disconnect crash, custom response headers type mismatch, HasStarted guard on ValidationException |
+
+### 16.3 All Issues Found & Fixed
+
+**Blocking**
+
+| # | Issue | Fix |
+|---|-------|-----|
+| B1 | Hangfire job carried full request body | Resolved — Hangfire removed (v3) |
+| B2 | Token cache not invalidated on CustomResponse update | Explicit `_memoryCache.Remove()` in SetCustomResponse, ResetCustomResponse, DeleteToken |
+| B3 | MSSQL Docker `init.sql` not supported by MSSQL image | Custom Dockerfile + `entrypoint.sh` polling loop + `sqlcmd` |
+| B4 | Request body stream consumed by middleware before controller | `Request.EnableBuffering()` as first line in `WebhookController` |
+| B5 | Kestrel `MaxRequestBodySize` not set from env var | `ConfigureKestrel()` in `Program.cs` + `[RequestSizeLimit]` attribute |
+| BN1 | All captured IPs were Nginx's Docker internal IP | Nginx passes `X-Real-IP` + `X-Forwarded-For`; API calls `UseForwardedHeaders()` early |
+| BN2 | `RetentionCleanupService` stops permanently on first DB error | try/catch wraps entire cleanup body; service continues on next tick |
+| BN3 | `ISseNotifier.NotifyAsync()` called before implementation existed | `NullSseNotifier` (no-op) registered from Day 1 |
+| BN4 | Body silently empty for chunked requests (no `Content-Length`) | Body reading is unconditional — ContentLength gate removed |
+
+**High Priority**
+
+| # | Issue | Fix |
+|---|-------|-----|
+| H4 | List endpoint returned full body — 200 MB responses possible | `SummaryDto` (no body) for list; `DetailDto` (with body) for single-item GET |
+| H5 | CORS not configured for Angular dev server | CORS from `Cors__AllowedOrigins` env var; override adds `:4200` |
+| HN1 | `"".Split(',')` produces `[""]` — empty string added as CORS origin | `StringSplitOptions.RemoveEmptyEntries | TrimEntries` |
+| HN2 | API container port was image-version-dependent | `ASPNETCORE_HTTP_PORTS: "8080"` explicit in docker-compose |
+| HN3 | `proxy_set_header Host` missing — generated URLs showed `http://api:8080/...` | Nginx passes `Host $host`; `WEBHOOK_BASE_URL` required at startup |
+| HN4 | SSE connection count check was TOCTOU race | Per-tokenId lock; check + increment in one critical section |
+| HN5 | `WebhookOptions` not validated at startup | `IValidateOptions<WebhookOptions>` + `.ValidateOnStart()` |
+
+**Medium**
+
+| # | Issue | Fix |
+|---|-------|-----|
+| M1 | SSE stream hangs when token is deleted | `token-deleted` SSE event + `Channel.Writer.Complete()` on delete |
+| M2 | No SSE connection limit per token | Max 10 concurrent; 11th → 429 |
+| M3 | Binary payloads corrupt in `NVARCHAR(MAX)` | Base64-encode; `IsBodyBase64` flag |
+| M4 | Search does not reset pagination | Angular resets to page 1 when search term changes |
+| M5 | No `pageSize` ceiling | FluentValidation enforces `pageSize` ≤ 100 |
+| MN1 | `NotifyAsync` called without try/catch in WebhookController | Wrapped in try/catch; 200 still returned (request is durable) |
+| MN2 | `RetentionCleanupService` injects scoped `DbContext` into singleton | Uses `IServiceScopeFactory`; new scope per cleanup tick |
+| MN3 | Token cache stampede possible | `GetOrCreateAsync` with sliding expiry; null never cached |
+| MN4 | `Path` and `QueryString` were unbounded `NVARCHAR(MAX)` | EF config: Path max 2048, QueryString max 4096 |
+| MN5 | `SseEvent` record missing from solution | Added to `Domain/Services/SseEvent.cs` |
+| MN6 | `GetTokensQuery` filter not documented | Handler explicitly filters `WHERE IsActive = 1` |
+| MN7 | E2E tests require Docker Compose v2 `--wait` flag | Prerequisite documented |
+| MN8 | No local dev DB guidance | `docker run` command added to development guide |
+
+**Post-Audit Bugs (found during live browser + SEQ audit, v6)**
+
+| # | Issue | Fix |
+|---|-------|-----|
+| PA1 | `GlobalExceptionMiddleware` crashed on SSE client disconnect — `OperationCanceledException` reached the generic `Exception` handler, which called `WriteErrorAsync`, which tried to set `StatusCode` on an already-started SSE response → `InvalidOperationException` | Added `catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)` silent branch; `if (context.Response.HasStarted) return;` guard in `WriteErrorAsync`; same guard on `ValidationException` branch |
+| PA2 | `SetCustomResponseDto.headers` type mismatch — Angular sent a `Record<string,string>` object but C# API expected a raw JSON `string` — every custom response save returned HTTP 400 | Changed `SetCustomResponseDto.headers` to `string`; dialog `save()` passes the raw textarea string directly (not `JSON.parse(headersJson)`) |
+
+---
+
+## 17. Trade-offs & Known Limitations
+
+| Limitation | Impact | Acceptable Because |
+|------------|--------|--------------------|
+| `LIKE` search — full scan per token | Slow for tokens with 10k+ requests | < 100 URLs, small team; FTS upgrade path documented |
+| SSE notify is best-effort — full channel buffer → event dropped | User may miss a live event; refresh restores it | Request is durable in DB |
+| Single API instance — SSE channels are in-process | Horizontal scaling breaks SSE | Redis upgrade path documented; interface unchanged |
+| Binary payloads Base64-encoded — ~33% storage overhead | Larger DB rows | Max 5–10 MB per request, small scale |
+| `PeriodicTimer(24h)` resets on restart | Cleanup may run slightly late after restart | Daily timing is not critical |
+| Soft-deleted tokens remain in DB | DB accumulates inactive rows | Negligible at < 100 URL scale |
+| `RetentionCleanupService` first tick is 24h after startup | No cleanup on day of startup | Acceptable |
+| No bulk export (all requests for a token) | Out of scope | Documented as future path |
+| No authentication | Anyone on the network can access all data | Designed for trusted internal networks; auth upgrade path documented |
+
+---
+
+## 18. Future Roadmap
+
+| Feature | Trigger | Migration Path |
+|---------|---------|----------------|
+| Redis for SSE + distributed cache | API needs horizontal scaling | Replace `SseNotifier` with Redis Pub/Sub; replace `IMemoryCache` with `IDistributedCache`. `ISseNotifier` interface unchanged. |
+| Authentication | Security requirement | JWT middleware + `[Authorize]` on all controllers. Domain/Application layers unchanged. |
+| Full-Text Search | `LIKE` too slow at scale | Add FTS catalog in EF migration; replace `LIKE` with `EF.Functions.Contains()`. One handler change. |
+| Bulk export | User request | `GET /api/tokens/{uuid}/requests/export` returning NDJSON or ZIP. |
+| Hangfire | Complex scheduled jobs needed | Add `WebhookService.Worker` project; move `RetentionCleanupService` to recurring Hangfire job. |
+
+---
+
+## 19. Access Points
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| Web UI | http://localhost:8088 | Angular SPA served by Nginx |
+| API (direct) | http://localhost:8080 | Bypasses Nginx; useful for dev/debug |
+| API Swagger | http://localhost:8080/swagger | OpenAPI explorer |
+| SEQ Logs | http://localhost:5342 | Localhost-only; not accessible from other hosts |
+| API Health (liveness) | http://localhost:8080/health/live | Always 200 if process is up |
+| API Health (readiness) | http://localhost:8080/health/ready | 200 if SQL Server reachable |
+| SQL Server | `localhost:1433` | Exposed in `docker-compose.override.yml` only |
+
+---
+
+## 20. Troubleshooting
+
+### SQL Server container stays unhealthy after startup
+
+SQL Server takes up to 45 s on first boot. The API retries automatically. Check logs:
 
 ```bash
 docker compose logs sqlserver
 ```
 
-**Generated webhook URLs show the wrong hostname**
+Look for `Initialisation complete.` in the output. If absent, verify `SA_PASSWORD` meets SQL Server's complexity requirements (≥ 8 chars, upper + lower + digit + symbol).
 
-`WEBHOOK_BASE_URL` must be the address that external callers can reach — not the internal container name. For a machine on your LAN use its LAN IP; behind a reverse proxy use the public hostname.
+### Generated webhook URLs show the wrong hostname
 
-**SSE does not update in real time**
+`WEBHOOK_BASE_URL` must be the address that external callers can reach, including the port. For local dev: `http://localhost:8088`. For LAN: `http://192.168.1.10:8088`. Not the internal container name (`http://api:8080`).
 
-Verify that Nginx has `proxy_buffering off` on the `~ ^/api/tokens/[^/]+/sse$` location block. If running the Angular dev server at port 4200, SSE connects through `proxy.conf.json` which forwards to port 8080 — ensure the .NET API is running first.
+### SSE does not update in real time
 
-**Integration tests fail with container errors**
+1. Verify Nginx has `proxy_buffering off` on the `~ ^/api/tokens/[^/]+/sse$` location
+2. If using Angular dev server at `:4200`, SSE goes through `proxy.conf.json` → port 8080; the .NET API must be running
+3. Verify the Angular `SseService` listens for `event: request` (not `event: new-request`)
+4. Open browser DevTools → Network → filter "EventSource" to see raw SSE frames
 
-Docker must be running before `dotnet test` on the integration project. Testcontainers pulls the SQL Server image automatically on first run, which may take a minute on a slow connection.
+### Custom response save returns HTTP 400
 
-**Build errors after pulling updates**
+The `headers` field must be a **JSON string** (`"{\"X-Custom\": \"value\"}"`) — not a JavaScript object. The dialog must pass the raw textarea string directly to the API, not `JSON.parse(rawHeaders)`. See §16 design decision PA2.
+
+### Port conflicts
+
+| Port | Service | Resolution |
+|------|---------|-----------|
+| 8088 | Nginx frontend | Change `ports` in `docker-compose.yml` frontend service |
+| 8080 | API | Change `ports` in `docker-compose.yml` api service |
+| 1433 | SQL Server | Only exposed in `docker-compose.override.yml` — omit override to avoid conflict |
+| 5341/5342 | SEQ | Bound to `127.0.0.1` — no external conflict possible |
+
+### Integration tests fail with container errors
+
+Docker must be running. Testcontainers pulls `mcr.microsoft.com/mssql/server:2022-latest` on first run — allow time for this on a slow connection.
+
+### E2E tests fail with `playwright.ps1 not found`
+
+Run `dotnet build tests/WebhookService.E2ETests/` first. The `playwright.ps1` script is only present after the project is built.
+
+### Build errors after pulling updates
 
 ```bash
 dotnet restore
