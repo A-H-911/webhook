@@ -13,7 +13,7 @@ public sealed class UpdateTokenCommandHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
     private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
-    private readonly IOptions<WebhookOptions> _options = Options.Create(new WebhookOptions
+    private readonly IOptions<WebhookOptions> _options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
     {
         BaseUrl = "https://example.com",
         RetentionDays = 7,

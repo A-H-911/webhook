@@ -11,7 +11,7 @@ namespace WebhookService.UnitTests.Application.Tokens;
 public sealed class CreateTokenCommandHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
-    private readonly IOptions<WebhookOptions> _options = Options.Create(new WebhookOptions
+    private readonly IOptions<WebhookOptions> _options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
     {
         BaseUrl = "https://example.com",
         RetentionDays = 7,
@@ -52,7 +52,7 @@ public sealed class CreateTokenCommandHandlerTests
     [Fact]
     public async Task Handle_TrimsTrailingSlashFromBaseUrl()
     {
-        var options = Options.Create(new WebhookOptions
+        var options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
         {
             BaseUrl = "https://example.com/",
             RetentionDays = 7,
