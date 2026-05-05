@@ -137,6 +137,14 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     }
 
     [Fact]
+    public async Task ResetCustomResponse_WithNonExistentToken_Returns404()
+    {
+        var response = await _client.DeleteAsync($"/api/tokens/{Guid.NewGuid()}/custom-response");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task SetCustomResponse_WithInvalidHeadersJson_Returns422()
     {
         var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "val-headers" });

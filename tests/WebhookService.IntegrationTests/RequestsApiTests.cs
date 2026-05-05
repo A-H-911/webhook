@@ -128,6 +128,16 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
     }
 
     [Fact]
+    public async Task ExportRequest_WithNonExistentRequestId_Returns404()
+    {
+        var (tokenId, _) = await CreateTokenAsync();
+
+        var response = await _client.GetAsync($"/api/tokens/{tokenId}/requests/{Guid.NewGuid()}/export");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task GetRequests_SecondPage_ReturnsCorrectSubset()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();

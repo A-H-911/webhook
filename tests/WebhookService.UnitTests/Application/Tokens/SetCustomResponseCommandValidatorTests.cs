@@ -16,10 +16,11 @@ public sealed class SetCustomResponseCommandValidatorTests
     [InlineData(200, "", "{}", false)]
     [InlineData(200, "text/plain", "not-json", false)]
     [InlineData(200, "text/plain", "[1,2]", false)]
+    [InlineData(200, "text/plain", null, false)]
     public void Validate_ReturnsExpectedResult(
-        int statusCode, string contentType, string headers, bool isValid)
+        int statusCode, string contentType, string? headers, bool isValid)
     {
-        var cmd = new SetCustomResponseCommand(Guid.NewGuid(), statusCode, contentType, null, headers);
+        var cmd = new SetCustomResponseCommand(Guid.NewGuid(), statusCode, contentType, null, headers!);
 
         var result = _validator.Validate(cmd);
 

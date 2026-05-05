@@ -41,4 +41,18 @@ public sealed class GetTokensQueryHandlerTests
 
         result.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task Handle_FallsBackToEmpty_WhenBaseUrlMissing()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var handler = new GetTokensQueryHandler(_repo, config);
+        var token = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
+        _repo.GetAllActiveAsync(Arg.Any<CancellationToken>()).Returns(new List<WebhookToken> { token });
+
+        var result = await handler.Handle(new GetTokensQuery(), CancellationToken.None);
+
+        result.Should().HaveCount(1);
+        result[0].WebhookUrl.Should().StartWith("/webhook/");
+    }
 }
