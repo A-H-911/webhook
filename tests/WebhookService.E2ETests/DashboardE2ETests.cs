@@ -7,26 +7,23 @@ using Microsoft.Playwright;
 namespace WebhookService.E2ETests;
 
 /// <summary>
-/// Full-stack E2E tests using Playwright headless Chromium.
-/// Requires the full stack running (docker compose up -d) or local dev.
-/// Set E2E_BASE_URL to target a running instance (default: http://localhost).
-/// Set E2E_AUTH_USERNAME / E2E_AUTH_PASSWORD for credentials (default: admin/admin).
-/// Before first run: pwsh bin/Debug/net10.0/playwright.ps1 install
+/// Shared fixture — launches browser and authenticates once for all tests in the class.
+/// This avoids hammering the /api/auth/login rate limiter (5 req/min) with per-test logins.
 /// </summary>
-public sealed class DashboardE2ETests : IAsyncLifetime
+public sealed class DashboardE2EFixture : IAsyncLifetime
 {
-    private IPlaywright _playwright = null!;
-    private IBrowser _browser = null!;
-    private IBrowserContext _authContext = null!;
-    private HttpClient _apiClient = null!;
+    public IPlaywright Playwright { get; private set; } = null!;
+    public IBrowser Browser { get; private set; } = null!;
+    public IBrowserContext AuthContext { get; private set; } = null!;
+    public HttpClient ApiClient { get; private set; } = null!;
 
-    private static string BaseUrl =>
+    public static string BaseUrl =>
         Environment.GetEnvironmentVariable("E2E_BASE_URL") ?? "http://localhost";
 
-    private static string AuthUsername =>
+    public static string AuthUsername =>
         Environment.GetEnvironmentVariable("E2E_AUTH_USERNAME") ?? "admin";
 
-    private static string AuthPassword =>
+    public static string AuthPassword =>
         Environment.GetEnvironmentVariable("E2E_AUTH_PASSWORD")
             ?? throw new InvalidOperationException(
                 "E2E_AUTH_PASSWORD environment variable is required. " +
@@ -34,25 +31,23 @@ public sealed class DashboardE2ETests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _playwright = await Playwright.CreateAsync();
-        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+        Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
+        Browser = await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
 
-        // Create an authenticated browser context shared by all tests
-        _authContext = await _browser.NewContextAsync();
-        await LoginAsync(_authContext);
+        AuthContext = await Browser.NewContextAsync();
+        await LoginAsync(AuthContext);
 
-        // Create an authenticated API client for test data setup
         var handler = new HttpClientHandler { UseCookies = true, CookieContainer = new CookieContainer() };
-        _apiClient = new HttpClient(handler) { BaseAddress = new Uri(BaseUrl) };
+        ApiClient = new HttpClient(handler) { BaseAddress = new Uri(BaseUrl) };
         await AuthenticateApiClientAsync();
     }
 
     public async Task DisposeAsync()
     {
-        _apiClient.Dispose();
-        await _authContext.DisposeAsync();
-        await _browser.DisposeAsync();
-        _playwright.Dispose();
+        ApiClient.Dispose();
+        await AuthContext.DisposeAsync();
+        await Browser.DisposeAsync();
+        Playwright.Dispose();
     }
 
     private async Task LoginAsync(IBrowserContext context)
@@ -68,16 +63,28 @@ public sealed class DashboardE2ETests : IAsyncLifetime
 
     private async Task AuthenticateApiClientAsync()
     {
-        var resp = await _apiClient.PostAsJsonAsync("/api/auth/login",
+        var resp = await ApiClient.PostAsJsonAsync("/api/auth/login",
             new { username = AuthUsername, password = AuthPassword });
         resp.EnsureSuccessStatusCode();
     }
+}
 
-    private async Task<IPage> NewPageAsync() => await _authContext.NewPageAsync();
+/// <summary>
+/// Full-stack E2E tests using Playwright headless Chromium.
+/// Requires the full stack running (docker compose up -d) or local dev.
+/// Set E2E_BASE_URL to target a running instance (default: http://localhost).
+/// Set E2E_AUTH_USERNAME / E2E_AUTH_PASSWORD for credentials (default: admin/admin).
+/// Before first run: pwsh bin/Debug/net10.0/playwright.ps1 install
+/// </summary>
+public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixture<DashboardE2EFixture>
+{
+    private static string BaseUrl => DashboardE2EFixture.BaseUrl;
+    private HttpClient ApiClient => fixture.ApiClient;
+    private Task<IPage> NewPageAsync() => fixture.AuthContext.NewPageAsync();
 
     private async Task<(string tokenId, string webhookUrl)> CreateTokenViaApiAsync(string description = "e2e-token")
     {
-        var resp = await _apiClient.PostAsJsonAsync("/api/tokens", new { description });
+        var resp = await ApiClient.PostAsJsonAsync("/api/tokens", new { description });
         var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         return (body.GetProperty("id").GetString()!, body.GetProperty("webhookUrl").GetString()!);
     }
@@ -87,7 +94,7 @@ public sealed class DashboardE2ETests : IAsyncLifetime
     [Fact]
     public async Task Login_UnauthenticatedAccess_RedirectsToLoginPage()
     {
-        var unauthContext = await _browser.NewContextAsync();
+        var unauthContext = await fixture.Browser.NewContextAsync();
         var page = await unauthContext.NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
         await Assertions.Expect(page).ToHaveURLAsync(new Regex("/login"));
@@ -135,7 +142,7 @@ public sealed class DashboardE2ETests : IAsyncLifetime
     public async Task Dashboard_CardClick_NavigatesToTokenDetailPage()
     {
         // Pre-create a token so a card is guaranteed to exist
-        var (tokenId, _) = await CreateTokenViaApiAsync("nav-test");
+        await CreateTokenViaApiAsync("nav-test");
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/dashboard");
         await page.WaitForSelectorAsync("mat-card");
@@ -168,7 +175,7 @@ public sealed class DashboardE2ETests : IAsyncLifetime
 
         // Send webhook before navigating so it is already in DB when page loads
         var content = new StringContent("{\"event\":\"e2e\"}", Encoding.UTF8, "application/json");
-        await _apiClient.PostAsync(new Uri(webhookUrl).PathAndQuery, content);
+        await ApiClient.PostAsync(new Uri(webhookUrl).PathAndQuery, content);
 
         var page = await NewPageAsync();
         await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
