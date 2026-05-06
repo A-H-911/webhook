@@ -48,10 +48,11 @@ POST /api/auth/logout → SignOutAsync
 ## Webhook Receive Flow
 ```
 POST /webhook/{guid} (AllowAnonymous)
-  → cache.Get("token:{guid}") or DB lookup
-  → persist WebhookRequest
-  → sseNotifier.NotifyAsync(tokenId, summary)
-  → return CustomResponse or 200
+  → cache.Get("token:{guid}") or GetByTokenIncludingInactiveAsync (includes inactive)
+  → wrap body-read in try/catch (IOException → BadHttpRequestException)
+  → persist WebhookRequest (always, even for inactive tokens — audit trail)
+  ├─ Active token: sseNotifier.NotifyAsync(tokenId, summary) + return CustomResponse or 200
+  └─ Inactive token: return 410 Gone (signals sender to stop retrying)
 ```
 
 ## SSE Flow
@@ -69,3 +70,11 @@ Maps `X-Forwarded-Proto` header via `docker/frontend/nginx-maps.conf` (00-maps.c
 - Preserves upstream proto (e.g. ngrok https) or falls back to direct scheme
 - SSE routes use `proxy_buffering off` and 3600s timeout
 - All backends use `$forwarded_scheme` instead of `$scheme` for cookie `Secure` flag
+
+## Resilience & Database
+
+SQL Server connection pool:
+- Retry on transient failures: `EnableRetryOnFailure(3, 2s)` in DependencyInjection.cs
+- Automatic exponential backoff: 1s → 2s between retries
+- Request ReceivedAt timestamp: `datetimeoffset(7)` for millisecond precision (migration 20260506202000_PinReceivedAtPrecision)
+- Pagination ordering: `ReceivedAt DESC, THEN Id DESC` for deterministic results

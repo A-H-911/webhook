@@ -1,9 +1,9 @@
-<!-- Generated: 2026-05-06 | Files scanned: 5 | Token estimate: ~350 -->
+<!-- Generated: 2026-05-06 | Files scanned: 5 | Token estimate: ~380 -->
 
 # Data Architecture
 
 ## Database
-SQL Server 2022 (Docker) — single database `WebhookDb`
+SQL Server 2022 (Docker) — single database `WebhookDb` with resilience: EnableRetryOnFailure(3, 2s)
 
 ## Tables
 
@@ -24,7 +24,7 @@ CustomResponse_Headers      NVARCHAR(MAX)     NULL  (raw JSON string)
 ```
 Id              UNIQUEIDENTIFIER  PK
 TokenId         UNIQUEIDENTIFIER  NOT NULL  FK → WebhookTokens(Id) CASCADE DELETE
-ReceivedAt      DATETIMEOFFSET    NOT NULL  INDEX
+ReceivedAt      DATETIMEOFFSET(7) NOT NULL  INDEX  (⚠ millisecond precision via 20260506202000_PinReceivedAtPrecision)
 Method          NVARCHAR(10)      NOT NULL
 Path            NVARCHAR(2048)    NOT NULL
 QueryString     NVARCHAR(4000)    NULL
@@ -36,8 +36,9 @@ IpAddress       NVARCHAR(45)      NOT NULL  (supports IPv6)
 UserAgent       NVARCHAR(512)     NULL
 SizeBytes       BIGINT            NOT NULL
 
-INDEX IX_WebhookRequests_TokenId
-INDEX IX_WebhookRequests_ReceivedAt
+IX_WebhookRequests_TokenId                 (lookup by token)
+IX_WebhookRequests_ReceivedAt              (ordering)
+Primary ordering: ReceivedAt DESC, THEN Id DESC (deterministic pagination)
 ```
 
 ## Relationships
@@ -54,9 +55,14 @@ WebhookTokens (1) ──< WebhookRequests (many)
 - Initial migration: `20260504115509_InitialCreate`
 
 ## Retention
-`RetentionCleanupService` deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`
+`RetentionCleanupService` deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`. Inactive tokens' requests are retained for audit trail.
 
 ## Token Cache
 `IMemoryCache` key `"token:{guid}"` — 5-minute sliding expiration.
+`GetByTokenIncludingInactiveAsync` retrieves both active and inactive tokens (used by receiver path).
 Invalidated (`cache.Remove`) on update, delete, set/reset custom-response.
 Null results are never cached.
+
+## Webhook Receiver Path
+- Active token: persists request, notifies SSE subscribers, returns 200 (or custom response)
+- Inactive token: persists request for audit trail, returns 410 Gone (signals sender to stop)

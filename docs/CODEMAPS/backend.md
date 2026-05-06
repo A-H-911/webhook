@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 105 | Token estimate: ~800 -->
+<!-- Generated: 2026-05-06 | Files scanned: 115 | Token estimate: ~850 -->
 
 # Backend Architecture
 
@@ -35,6 +35,8 @@ DELETE /api/tokens/{tokenId}/requests/{id}        → DeleteRequestCommand
 ### Webhook Receiver (AllowAnonymous)
 ```
 */webhook/{token:guid}   → WebhookController.Receive (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)
+  ├─ Active token:      200 OK + custom response (if set) + SSE notify
+  └─ Inactive token:    410 Gone + persists request for audit
 ```
 
 ### Health
@@ -49,17 +51,29 @@ ForwardedHeaders → GlobalExceptionMiddleware → CORS → RateLimiter
 → Authentication → Authorization → Controllers
 ```
 
+## Exception Handling (GlobalExceptionMiddleware)
+```
+OperationCanceledException (RequestAborted)  → silent swallow (normal SSE disconnect)
+ValidationException                          → 422 Unprocessable Entity + field errors
+BadHttpRequestException                      → 400 Bad Request or 413 Payload Too Large
+Exception (unhandled)                        → 500 Internal Server Error (logged, not exposed)
+
+SSE Safety: writes guarded by context.Response.HasStarted check
+```
+
 ## Key Files
 ```
-src/WebhookService.API/Program.cs                               (DI, middleware pipeline, 166 lines)
-src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs  (exception→HTTP, SSE guard)
+src/WebhookService.API/Program.cs                               (DI, middleware, EnableRetryOnFailure 3×2s)
+src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs  (BadHttpRequestException handler, SSE guard)
 src/WebhookService.API/Controllers/AuthController.cs           (login/logout/me)
-src/WebhookService.API/Controllers/WebhookController.cs        (receiver, cache, SSE notify)
+src/WebhookService.API/Controllers/WebhookController.cs        (receiver: GetByTokenIncludingInactiveAsync, 410 Gone, catch IOException)
 src/WebhookService.API/Controllers/SseController.cs            (SSE subscribe/stream)
 src/WebhookService.API/Controllers/TokensController.cs         (CRUD + custom-response)
 src/WebhookService.API/Controllers/RequestsController.cs       (paging, export, delete)
 src/WebhookService.Application/Common/Behaviors/ValidationBehavior.cs
 src/WebhookService.Application/Common/Behaviors/LoggingBehavior.cs
+src/WebhookService.Infrastructure/Persistence/Repositories/WebhookRequestRepository.cs (ThenByDescending(r => r.Id) for determinism)
+src/WebhookService.Infrastructure/Persistence/Configurations/WebhookRequestConfiguration.cs (ReceivedAt: datetimeoffset(7))
 src/WebhookService.Infrastructure/Sse/SseNotifier.cs           (ConcurrentDictionary<Guid, Channel>)
 src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs
 ```

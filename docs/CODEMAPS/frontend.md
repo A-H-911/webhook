@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 19 | Token estimate: ~450 -->
+<!-- Generated: 2026-05-06 | Files scanned: 19 | Token estimate: ~480 -->
 
 # Frontend Architecture
 
@@ -48,6 +48,14 @@ APP_INITIALIZER → AuthService.initialize() → GET /api/auth/me (swallows erro
 ```
 httpErrorInterceptor:
   401 response + path not /api/auth/ → AuthService.clearSession() + navigate('/login')
+```
+
+## Timestamp Display
+All three surfaces now display millisecond precision (HH:mm:ss.SSS):
+```
+Dashboard token list:        created {{ token.createdAt | date:'MMM d, y, HH:mm:ss.SSS' }}
+Request list (compact):      {{ req.receivedAt | date:'HH:mm:ss.SSS' }}
+Request detail panel:        {{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss.SSS' }}
 ```
 
 ## SSE Wire Protocol
