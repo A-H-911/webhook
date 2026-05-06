@@ -26,20 +26,25 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
                 await context.Response.WriteAsync(JsonSerializer.Serialize(new { errors }));
             }
         }
+        catch (BadHttpRequestException ex)
+        {
+            logger.LogWarning(ex, "Bad HTTP request for {Method} {Path}", context.Request.Method, context.Request.Path);
+            await WriteErrorAsync(context, ex.StatusCode, ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unhandled exception for {Method} {Path}", context.Request.Method, context.Request.Path);
-            await WriteErrorAsync(context);
+            await WriteErrorAsync(context, (int)HttpStatusCode.InternalServerError, "An unexpected error occurred.");
         }
     }
 
-    private static async Task WriteErrorAsync(HttpContext context)
+    private static async Task WriteErrorAsync(HttpContext context, int statusCode, string message)
     {
         if (context.Response.HasStarted)
             return;
 
-        context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+        context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = "An unexpected error occurred." }));
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = message }));
     }
 }

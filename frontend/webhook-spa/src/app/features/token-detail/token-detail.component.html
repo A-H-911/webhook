@@ -67,7 +67,7 @@
               <div class="req-info">
                 <span class="req-path">{{ req.path }}</span>
                 <span class="req-meta">
-                  {{ req.receivedAt | date:'HH:mm:ss' }} &middot; {{ req.sizeBytes }} B &middot; {{ req.ipAddress }}
+                  {{ req.receivedAt | date:'HH:mm:ss.SSS' }} &middot; {{ req.sizeBytes }} B &middot; {{ req.ipAddress }}
                 </span>
               </div>
               <button mat-icon-button matTooltip="Delete" class="row-action"
@@ -115,7 +115,7 @@
 
           <div class="detail-grid">
             <span class="detail-label">Received</span>
-            <span>{{ selectedDetail()!.receivedAt | date:'medium' }}</span>
+            <span>{{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss.SSS' }}</span>
 
             <span class="detail-label">IP</span>
             <span>{{ selectedDetail()!.ipAddress }}</span>

@@ -138,6 +138,60 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
     }
 
     [Fact]
+    public async Task GetRequests_ReceivedAt_HasMillisecondPrecision()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+
+        var response = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var receivedAt = result.GetProperty("items")[0].GetProperty("receivedAt").GetString()!;
+
+        // ISO 8601 with at least 3 fractional-second digits, e.g. "2026-05-06T10:30:45.1234567+00:00"
+        receivedAt.Should().MatchRegex(@"\.\d{3,7}");
+    }
+
+    [Fact]
+    public async Task ExportRequest_ReceivedAt_HasMillisecondPrecision()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken, "{\"export\":true}");
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var exportContent = await (await _client.GetAsync(
+            $"/api/tokens/{tokenId}/requests/{requestId}/export"))
+            .Content.ReadAsStringAsync();
+
+        // Exported JSON must preserve sub-second precision on ReceivedAt
+        exportContent.Should().MatchRegex(@"ReceivedAt.*\.\d{3,7}");
+    }
+
+    [Fact]
+    public async Task GetRequests_IsOrderedNewestFirst()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken, "{\"seq\":1}");
+        await SendWebhookAsync(webhookToken, "{\"seq\":2}");
+        await SendWebhookAsync(webhookToken, "{\"seq\":3}");
+
+        var response = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var items = result.GetProperty("items").EnumerateArray().ToList();
+
+        items.Should().HaveCountGreaterThanOrEqualTo(3);
+
+        for (var i = 0; i < items.Count - 1; i++)
+        {
+            var current = DateTimeOffset.Parse(items[i].GetProperty("receivedAt").GetString()!);
+            var next = DateTimeOffset.Parse(items[i + 1].GetProperty("receivedAt").GetString()!);
+            current.Should().BeOnOrAfter(next);
+        }
+    }
+
+    [Fact]
     public async Task GetRequests_SecondPage_ReturnsCorrectSubset()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();

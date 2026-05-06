@@ -17,7 +17,7 @@ public sealed class WebhookRequestConfiguration : IEntityTypeConfiguration<Webho
         builder.Property(r => r.ContentType).HasMaxLength(256);
         builder.Property(r => r.IpAddress).HasMaxLength(45).IsRequired();
         builder.Property(r => r.UserAgent).HasMaxLength(512);
-        builder.Property(r => r.ReceivedAt).IsRequired();
+        builder.Property(r => r.ReceivedAt).IsRequired().HasColumnType("datetimeoffset(7)");
 
         builder.HasIndex(r => r.TokenId);
         builder.HasIndex(r => r.ReceivedAt);

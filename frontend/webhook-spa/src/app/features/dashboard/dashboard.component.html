@@ -34,7 +34,7 @@
               <p class="token-description">{{ token.description }}</p>
             }
             <div class="token-meta">
-              <span>Created {{ token.createdAt | date:'medium' }}</span>
+              <span>Created {{ token.createdAt | date:'MMM d, y, HH:mm:ss.SSS' }}</span>
               @if (token.customResponse) {
                 <span class="custom-badge">Custom response</span>
               }

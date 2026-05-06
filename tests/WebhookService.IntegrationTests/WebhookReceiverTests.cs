@@ -80,7 +80,7 @@ public sealed class WebhookReceiverTests(WebAppFactory factory) : IClassFixture<
         items[0].GetProperty("method").GetString().Should().Be("GET");
     }
     [Fact]
-    public async Task PostToWebhook_WithInactiveToken_Returns404()
+    public async Task PostToWebhook_WithInactiveToken_Returns410()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();
 
@@ -89,7 +89,27 @@ public sealed class WebhookReceiverTests(WebAppFactory factory) : IClassFixture<
         var content = new StringContent("{}", Encoding.UTF8, "application/json");
         var response = await _client.PostAsync($"/webhook/{webhookToken}", content);
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.Gone);
+    }
+
+    [Fact]
+    public async Task PostToWebhook_WithInactiveToken_StillPersistsRequest()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+
+        await _client.DeleteAsync($"/api/tokens/{tokenId}");
+
+        var content = new StringContent("{\"archived\":true}", Encoding.UTF8, "application/json");
+        await _client.PostAsync($"/webhook/{webhookToken}", content);
+
+        // Reactivate so we can read the requests back via the API
+        await _client.PutAsJsonAsync($"/api/tokens/{tokenId}",
+            new { description = "reactivated", isActive = true });
+
+        var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        list.GetProperty("total").GetInt32().Should().BeGreaterThan(0);
     }
 
     [Fact]

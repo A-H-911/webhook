@@ -17,7 +17,12 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         services.AddDbContext<ApplicationDbContext>(opts =>
-            opts.UseSqlServer(configuration.GetConnectionString("WebhookDb")));
+            opts.UseSqlServer(
+                configuration.GetConnectionString("WebhookDb"),
+                sql => sql.EnableRetryOnFailure(
+                    maxRetryCount: 3,
+                    maxRetryDelay: TimeSpan.FromSeconds(2),
+                    errorNumbersToAdd: null)));
 
         services.AddScoped<IWebhookTokenRepository, WebhookTokenRepository>();
         services.AddScoped<IWebhookRequestRepository, WebhookRequestRepository>();

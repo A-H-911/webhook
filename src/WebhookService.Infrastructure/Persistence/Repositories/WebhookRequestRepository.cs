@@ -27,6 +27,7 @@ internal sealed class WebhookRequestRepository : IWebhookRequestRepository
 
         var items = await query
             .OrderByDescending(r => r.ReceivedAt)
+            .ThenByDescending(r => r.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);

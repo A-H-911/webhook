@@ -31,7 +31,7 @@ public sealed class WebhookController(
 
         Request.EnableBuffering();
         Request.Body.Seek(0, SeekOrigin.Begin);
-        var body = await ReadBodyAsync(ct);
+        var body = await ReadBodyAsync(token, ct);
 
         var request = new WebhookRequest
         {
@@ -51,6 +51,10 @@ public sealed class WebhookController(
         };
 
         await requestRepository.AddAsync(request, ct);
+
+        // Inactive tokens: persisted for audit, but return 410 Gone to signal senders to stop.
+        if (!webhookToken.IsActive)
+            return StatusCode(StatusCodes.Status410Gone, new { message = "This webhook URL has been deactivated." });
 
         try
         {
@@ -86,21 +90,29 @@ public sealed class WebhookController(
         if (cache.TryGetValue(cacheKey, out WebhookToken? cached))
             return cached;
 
-        var found = await tokenRepository.GetByTokenAsync(token, ct);
+        var found = await tokenRepository.GetByTokenIncludingInactiveAsync(token, ct);
         if (found is not null)
             cache.Set(cacheKey, found, TokenCacheOptions);
 
         return found;
     }
 
-    private async Task<string?> ReadBodyAsync(CancellationToken ct)
+    private async Task<string?> ReadBodyAsync(Guid token, CancellationToken ct)
     {
         if (Request.ContentLength == 0)
             return null;
 
-        using var reader = new StreamReader(Request.Body, Encoding.UTF8, leaveOpen: true);
-        var body = await reader.ReadToEndAsync(ct);
-        return string.IsNullOrEmpty(body) ? null : body;
+        try
+        {
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8, leaveOpen: true);
+            var body = await reader.ReadToEndAsync(ct);
+            return string.IsNullOrEmpty(body) ? null : body;
+        }
+        catch (IOException ex)
+        {
+            logger.LogWarning(ex, "Failed to read request body for token {Token}", token);
+            throw new BadHttpRequestException("Could not read request body.", StatusCodes.Status400BadRequest);
+        }
     }
 
     private static string SerializeHeaders(IHeaderDictionary headers)
