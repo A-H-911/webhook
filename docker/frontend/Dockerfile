@@ -9,7 +9,8 @@ RUN npm run build -- --configuration production
 
 FROM nginx:alpine AS runtime
 
-COPY docker/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker/frontend/nginx-maps.conf /etc/nginx/conf.d/00-maps.conf
+COPY docker/frontend/nginx.conf      /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist/webhook-spa/browser /usr/share/nginx/html
 
 EXPOSE 80

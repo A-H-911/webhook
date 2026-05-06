@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-05 | Files scanned: 95 | Token estimate: ~750 -->
+<!-- Generated: 2026-05-06 | Files scanned: 105 | Token estimate: ~800 -->
 
 # Backend Architecture
 
@@ -76,3 +76,4 @@ Auth:SessionHours        — cookie sliding expiry
 
 ## IDOR Protection
 `GetRequestById`, `ExportRequest`, `DeleteRequest` all include `WHERE TokenId = @tokenId`
+

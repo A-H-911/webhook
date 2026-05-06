@@ -119,7 +119,7 @@ docker/
 
 **Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. Hangfire is not used. DB errors are caught and logged without stopping the timer.
 
-**Token cache:** `GetOrCreateAsync` with 60-second sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found or inactive. `SetCustomResponse`, `ResetCustomResponse`, and `DeleteToken` all call `cache.Remove(tokenId)` after mutating.
+**Token cache:** `GetOrCreateAsync` with 5-minute sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found or inactive. `SetCustomResponse`, `ResetCustomResponse`, and `DeleteToken` all call `cache.Remove(tokenId)` after mutating.
 
 **Repository reads:** Both `WebhookTokenRepository` and `WebhookRequestRepository` use `.AsNoTracking()` on every SELECT query.
 
@@ -227,7 +227,7 @@ public async Task<IActionResult> Archive(Guid id)
 }
 ```
 
-**5. If mutating cached token data:** Call `cache.Remove(cmd.TokenId)` in the handler. Skipping this serves stale data for up to 60 seconds.
+**5. If mutating cached token data:** Call `cache.Remove(cmd.TokenId)` in the handler. Skipping this serves stale data for up to 5 minutes.
 
 For queries: implement `IRequest<TResult>` and return `TResult` from the handler. Validators are optional for read-only queries.
 
@@ -258,7 +258,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 |-----------|-------------------------------------|
 | SSE wire event name `event: request` | Angular `SseService` hardcodes `addEventListener('request', ...)`. Rename the server side → Angular stops receiving events with no error. |
 | `Headers` field type `string` (raw JSON) on both C# and Angular | The dialog validates with `JSON.parse` but sends the raw string. Changing to `object` on one side → 400 or silent empty headers. |
-| `cache.Remove(tokenId)` on every token mutation | Omitting it → stale custom response or active-state served for up to 60 seconds. |
+| `cache.Remove(tokenId)` on every token mutation | Omitting it → stale custom response or active-state served for up to 5 minutes. |
 | `if (context.Response.HasStarted) return;` guard in `GlobalExceptionMiddleware` | SSE responses already flushed headers. Without this guard, setting `StatusCode` throws `InvalidOperationException`. |
 | Silent swallow of `OperationCanceledException` when `RequestAborted.IsCancellationRequested` | Normal SSE client disconnect. Logging it as an error floods SEQ on every tab close. |
 | `.AsNoTracking()` on all repository reads | Removing it enables EF Core change tracking on read-only queries; mutations in the same scope may unexpectedly persist phantom changes. |

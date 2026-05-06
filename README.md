@@ -685,7 +685,23 @@ location / {
 }
 ```
 
-All proxy locations pass: `Host $host`, `X-Real-IP $remote_addr`, `X-Forwarded-For $proxy_add_x_forwarded_for`, `X-Forwarded-Proto $scheme`.
+All proxy locations pass: `Host $host`, `X-Real-IP $remote_addr`, `X-Forwarded-For $proxy_add_x_forwarded_for`, `X-Forwarded-Proto $forwarded_scheme`.
+
+`$forwarded_scheme` is defined in `docker/frontend/nginx-maps.conf` (loaded as `00-maps.conf`). It preserves an upstream `X-Forwarded-Proto` header (e.g. from ngrok) rather than using the local `$scheme`, ensuring the API sets the `Secure` cookie flag correctly behind a TLS-terminating proxy. The API's `ForwardedHeadersOptions.ForwardLimit` is `2` to accommodate the two-hop chain: ngrok → nginx → api.
+
+### ngrok Tunnel (`docker-compose.ngrok.yml`)
+
+Expose the stack publicly without port-forwarding:
+
+```bash
+# Add to .env:
+# NGROK_AUTHTOKEN=<your_ngrok_token>
+# WEBHOOK_BASE_URL=https://<your-ngrok-domain>
+
+docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
+```
+
+This adds an `ngrok` service that tunnels `https://<domain> → frontend:80`. The ngrok inspector UI is available at `http://localhost:4041`.
 
 ### Development Override (`docker-compose.override.yml`)
 
@@ -719,6 +735,7 @@ All configuration is via environment variables.
 | `MAX_REQUEST_SIZE_MB` | No | `5` | 1–100 | Max accepted request body size in MB |
 | `AUTH_SESSION_HOURS` | No | `8` | 1–168 | Session cookie lifetime in hours |
 | `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
+| `NGROK_AUTHTOKEN` | No | — | ngrok auth token | Required only when using `docker-compose.ngrok.yml` |
 
 **Generating a BCrypt hash** (run once, store the output as `AUTH_PASSWORD_HASH`):
 

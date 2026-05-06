@@ -1,0 +1,28 @@
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
+#
+# Required in .env:
+#   NGROK_AUTHTOKEN=<your_token>
+#   WEBHOOK_BASE_URL=https://twk-webhook-unifonic.ngrok.app
+#
+# WEBHOOK_BASE_URL is set in .env and flows to the api service through the existing
+# Webhook__BaseUrl binding in docker-compose.yml — no override is needed in this file.
+
+services:
+  ngrok:
+    image: ngrok/ngrok:latest
+    command: >
+      http
+      --domain=twk-webhook-unifonic.ngrok.app
+      frontend:80
+    environment:
+      NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN}"
+    depends_on:
+      - frontend
+    networks:
+      - webhook-net
+    ports:
+      - "127.0.0.1:4041:4040"
+    restart: unless-stopped
+
+networks:
+  webhook-net:

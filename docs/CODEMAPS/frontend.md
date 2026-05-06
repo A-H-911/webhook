@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-05 | Files scanned: 21 | Token estimate: ~450 -->
+<!-- Generated: 2026-05-06 | Files scanned: 19 | Token estimate: ~450 -->
 
 # Frontend Architecture
 

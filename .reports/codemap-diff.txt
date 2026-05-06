@@ -1,57 +1,68 @@
 Codemap Scan Report — 2026-05-06
 =================================
 
-Status: UPDATE CYCLE (checking changes since 2026-05-05)
+Status: UPDATE CYCLE (checking changes since prior 2026-05-06 scan)
 
 What Changed Since Last Codemap
 --------------------------------
-- tests/WebhookService.E2ETests/DashboardE2ETests.cs:
-  Refactored to use IClassFixture<DashboardE2EFixture> with primary constructor injection.
-  Pattern: class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixture<DashboardE2EFixture>
+- src/WebhookService.API/Program.cs:
+  ForwardLimit changed 1→2 to support ngrok double-hop proxy chain.
+  (Already reflected in architecture.md.)
 
-- tests/WebhookService.E2ETests/DashboardE2EFixture.cs:
-  NEW FILE — extracted shared fixture implementing IAsyncLifetime.
-  Handles browser launch, auth setup, and cleanup once per test class.
-  Reason: Avoid hammering /api/auth/login rate limiter (5 req/min).
+- docker/frontend/nginx.conf:
+  X-Forwarded-Proto now uses $forwarded_scheme instead of $scheme.
+  (Already reflected in architecture.md.)
+
+- docker/frontend/nginx-maps.conf (NEW):
+  Defines $forwarded_scheme nginx map variable — preserves upstream proto (e.g. ngrok https).
+  (Already reflected in architecture.md.)
+
+- docker-compose.ngrok.yml (NEW):
+  Optional compose override to expose the stack via ngrok tunnel on port 80.
+  (Already reflected in architecture.md.)
+
+- src/WebhookService.API/Options/WebhookOptions.cs (REMOVED — dead code):
+  Duplicate of src/WebhookService.Application/Options/WebhookOptions.cs.
+  Canonical location is Application project.
+
+- src/WebhookService.Infrastructure/Sse/NullSseNotifier.cs (REMOVED — dead code):
+  Unused. TestNullSseNotifier in test project is the correct test double.
+
+- tests/WebhookService.E2ETests/UnitTest1.cs (REMOVED — empty stub)
+- tests/WebhookService.IntegrationTests/UnitTest1.cs (REMOVED — empty stub)
 
 Codemaps Reviewed
 -----------------
-docs/CODEMAPS/architecture.md   ✓ No changes needed (E2E test structure not documented)
-docs/CODEMAPS/backend.md        ✓ No changes needed (no route/middleware changes)
-docs/CODEMAPS/frontend.md       ✓ No changes needed (no component changes)
-docs/CODEMAPS/data.md           ✓ No changes needed (no schema changes)
-docs/CODEMAPS/dependencies.md   ✓ No changes needed (frameworks listed, fixture is implementation detail)
+docs/CODEMAPS/architecture.md   ✓ Already current (ngrok, ForwardLimit=2, $forwarded_scheme reflected 2026-05-06)
+docs/CODEMAPS/backend.md        ✓ Already current (no route/handler/middleware changes)
+docs/CODEMAPS/frontend.md       ✓ Updated header date and file count (19 ts files, was 21)
+docs/CODEMAPS/data.md           ✓ Updated header date (schema unchanged)
+docs/CODEMAPS/dependencies.md   ✓ Updated header date (no package changes)
 
 Codemaps Updated
 ----------------
-NONE — E2E fixture refactoring is test-only structural change with no architectural impact.
-
-Rationale
----------
-The codemaps focus on production architecture, data flow, and dependencies.
-E2E test fixture pattern is implementation-specific and self-documenting via code comments.
-This pattern does not affect:
-  • API routes or handlers
-  • Database schema or retention
-  • Frontend component hierarchy
-  • Package dependencies
-  • Middleware pipeline
-  • CQRS handler map
+docs/CODEMAPS/frontend.md     — header: date 2026-05-05→2026-05-06, files scanned 21→19
+docs/CODEMAPS/data.md         — header: date 2026-05-05→2026-05-06
+docs/CODEMAPS/dependencies.md — header: date 2026-05-05→2026-05-06
 
 Staleness Assessment
 --------------------
-All codemaps remain fresh and accurate:
-- architecture.md: 2026-05-05 — Current (no system diagram changes)
-- backend.md:      2026-05-05 — Current (no route/handler changes)
-- frontend.md:     2026-05-05 — Current (no component changes)
-- data.md:         2026-05-05 — Current (no schema changes)
-- dependencies.md: 2026-05-05 — Current (no package upgrades)
+All codemaps are fresh and accurate as of 2026-05-06:
+- architecture.md:  2026-05-06 — Current
+- backend.md:       2026-05-06 — Current
+- frontend.md:      2026-05-06 — Current
+- data.md:          2026-05-06 — Current
+- dependencies.md:  2026-05-06 — Current
 
-Notable Facts Captured
-----------------------
-- Cookie auth (not JWT) — required because SSE (EventSource) cannot set custom headers
-- SSE wire event name is "event: request" (not "new-request") — Angular adapter remaps internally
+Notable Facts Confirmed This Scan
+----------------------------------
+- Token cache: 5-minute sliding expiry (TimeSpan.FromMinutes(5) in WebhookController.cs:22)
+  Note: CLAUDE.md incorrectly states 60 seconds — source code is authoritative.
+- SSE wire event name "event: request"; Angular SseService maps internally to 'new-request'
+- SSE token-deleted event wired and functional (sse.service.ts:addEventListener)
+- WebhookOptions canonical location: src/WebhookService.Application/Options/WebhookOptions.cs
+- ForwardedHeaders ForwardLimit=2 (API) + $forwarded_scheme nginx map = ngrok-compatible proto propagation
+- Cookie auth (not JWT) — required because EventSource cannot send custom headers
 - Cancel button in CreateTokenDialog uses [mat-dialog-close]="null" (bound) not plain attribute
 - Headers field on SetCustomResponse is a raw JSON string on both C# and Angular sides
-- Token cache uses 5-min sliding expiry; null results explicitly NOT cached
-- E2E tests use IClassFixture<DashboardE2EFixture> for shared browser/auth setup (2026-05-06)
+- E2E tests use IClassFixture<DashboardE2EFixture> for shared browser/auth setup

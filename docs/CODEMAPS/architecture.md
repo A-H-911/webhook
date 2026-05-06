@@ -1,9 +1,9 @@
-<!-- Generated: 2026-05-05 | Files scanned: 95 | Token estimate: ~600 -->
+<!-- Generated: 2026-05-06 | Files scanned: 105 | Token estimate: ~650 -->
 
 # Architecture
 
 ## Project Type
-Full-stack monorepo — .NET 10 Clean Architecture API + Angular 21 SPA + SQL Server + SEQ
+Full-stack monorepo — .NET 10 Clean Architecture API + Angular 21 SPA + SQL Server + SEQ + optional ngrok tunnel
 
 ## System Diagram
 ```
@@ -15,8 +15,8 @@ Nginx :8088
   │  / → static Angular bundle
   ▼
 ASP.NET Core API :8080
+  │  ForwardedHeaders (ForwardLimit=2, X-Forwarded-For / X-Forwarded-Proto)
   │  GlobalExceptionMiddleware → RateLimiter → Authentication → Authorization
-  │  ForwardedHeaders (X-Forwarded-For / X-Forwarded-Proto)
   ▼
 Application Layer (MediatR CQRS)
   │  ValidationBehavior (FluentValidation) → LoggingBehavior → Handler
@@ -25,6 +25,9 @@ Infrastructure Layer
   ├── EF Core → SQL Server (WebhookTokens, WebhookRequests)
   ├── SseNotifier (ConcurrentDictionary<Guid, Channel<SseEvent>>)
   └── RetentionCleanupService (PeriodicTimer 24h)
+
+Optional ngrok tunnel (docker-compose.ngrok.yml):
+  Browser ──HTTPS──> ngrok:4040 ──> Nginx:80
 ```
 
 ## Dependency Rule (Clean Architecture)
@@ -59,3 +62,10 @@ GET /api/tokens/{id}/sse (authenticated)
   → wire event name: "event: request"
   → max 10 concurrent connections per token
 ```
+
+## Reverse Proxy (Nginx)
+
+Maps `X-Forwarded-Proto` header via `docker/frontend/nginx-maps.conf` (00-maps.conf):
+- Preserves upstream proto (e.g. ngrok https) or falls back to direct scheme
+- SSE routes use `proxy_buffering off` and 3600s timeout
+- All backends use `$forwarded_scheme` instead of `$scheme` for cookie `Secure` flag
