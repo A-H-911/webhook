@@ -1,0 +1,48 @@
+{
+  "name": "Webhook Service Smoke Evals",
+  "description": "Critical-path eval fixtures for token lifecycle and webhook receipt flows.",
+  "cases": [
+    {
+      "id": "create-token",
+      "description": "Creating a token returns a webhook URL",
+      "input": { "description": "Test token" },
+      "expected": {
+        "status": 201,
+        "fields": ["id", "webhookUrl", "description", "isActive"]
+      }
+    },
+    {
+      "id": "post-to-webhook",
+      "description": "POST to webhook URL returns 200 and persists the request",
+      "input": {
+        "method": "POST",
+        "body": "{\"hello\":\"world\"}",
+        "contentType": "application/json"
+      },
+      "expected": {
+        "status": 200,
+        "sideEffect": "request stored under token"
+      }
+    },
+    {
+      "id": "custom-response",
+      "description": "Setting a custom response changes what the webhook endpoint returns",
+      "input": {
+        "statusCode": 201,
+        "contentType": "application/json",
+        "body": "{\"ok\":true}",
+        "headers": "{}"
+      },
+      "expected": {
+        "webhookResponseStatus": 201,
+        "webhookResponseBody": "{\"ok\":true}"
+      }
+    },
+    {
+      "id": "delete-token",
+      "description": "Deleting a token removes it and its requests",
+      "input": { "tokenId": "<uuid>" },
+      "expected": { "status": 204 }
+    }
+  ]
+}

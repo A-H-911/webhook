@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const i=JSON.parse(d);const cmd=(i.tool_input?.command||'').toLowerCase();const blocked=['rm -rf /','drop table','drop database','format c:','del /s /q c:\\\\'];for(const b of blocked){if(cmd.includes(b)){console.error('[Guard] BLOCKED: destructive pattern detected: '+b);process.exit(2)}}console.log(d)}catch(e){console.log(d)}})\""
+          }
+        ]
+      }
+    ]
+  }
+}
