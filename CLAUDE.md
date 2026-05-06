@@ -119,13 +119,17 @@ docker/
 
 **Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. Hangfire is not used. DB errors are caught and logged without stopping the timer.
 
-**Token cache:** `GetOrCreateAsync` with 5-minute sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found or inactive. `SetCustomResponse`, `ResetCustomResponse`, and `DeleteToken` all call `cache.Remove(tokenId)` after mutating.
+**Token cache:** `IMemoryCache` key `"token:{guid}"` with 5-minute sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found. Both active and inactive tokens are cached (receiver needs fast 410 lookup). `SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`, and `UpdateToken` all call `cache.Remove(tokenId)` after mutating.
 
-**Repository reads:** Both `WebhookTokenRepository` and `WebhookRequestRepository` use `.AsNoTracking()` on every SELECT query.
+**Inactive token audit trail:** Receiver path uses `GetByTokenIncludingInactiveAsync` (not filtered by `IsActive`) and **always** persists requests from inactive tokens. Returns 410 Gone but request is recorded in DB for compliance/audit purposes.
+
+**Repository reads:** Both `WebhookTokenRepository` and `WebhookRequestRepository` use `.AsNoTracking()` on every SELECT query. `WebhookRequestRepository` orders paginated results by `ReceivedAt DESC, THEN Id DESC` for deterministic pagination.
 
 **IDOR protection:** `GetRequestById`, `ExportRequest`, and `DeleteRequest` all include `WHERE TokenId = @tokenId` to verify ownership.
 
 **HTTP 422 validation:** `GlobalExceptionMiddleware` maps `FluentValidation.ValidationException` → HTTP 422 with field/message error list. Not 400.
+
+**Bad request handling:** `GlobalExceptionMiddleware` catches `BadHttpRequestException` (from body read errors or Kestrel validation) and returns 400 or 413 (per `ex.StatusCode`). Logged with method/path context. Example: `IOException` on body read → `BadHttpRequestException` (400).
 
 **SSE disconnect handling:** `GlobalExceptionMiddleware` silently swallows `OperationCanceledException` when `context.RequestAborted.IsCancellationRequested`. `WriteErrorAsync` guards with `if (context.Response.HasStarted) return;` — SSE responses have already flushed headers; writing `StatusCode` on a started response throws `InvalidOperationException`.
 
@@ -262,6 +266,8 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | `if (context.Response.HasStarted) return;` guard in `GlobalExceptionMiddleware` | SSE responses already flushed headers. Without this guard, setting `StatusCode` throws `InvalidOperationException`. |
 | Silent swallow of `OperationCanceledException` when `RequestAborted.IsCancellationRequested` | Normal SSE client disconnect. Logging it as an error floods SEQ on every tab close. |
 | `.AsNoTracking()` on all repository reads | Removing it enables EF Core change tracking on read-only queries; mutations in the same scope may unexpectedly persist phantom changes. |
+| **Always** persist WebhookRequest, even from inactive tokens | Callers rely on audit trail; removing persistence breaks compliance logging and makes 410 signal ambiguous. |
+| Receiver uses `GetByTokenIncludingInactiveAsync`, not `GetByTokenAsync` | Dashboard queries filter `IsActive=1` but receiver needs both states. Swapping methods causes inactive tokens to return 404 instead of 410. |
 | `WHERE TokenId = @tokenId` in GetRequestById / ExportRequest / DeleteRequest | Removing it enables IDOR — any token holder can read or delete another token's requests. **Security regression.** |
 | Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph. |
 | `[AllowAnonymous]` on `WebhookController` | External callers never have credentials. Removing it breaks all webhook delivery. |
