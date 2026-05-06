@@ -28,6 +28,10 @@ frontend/webhook-spa/.angular/
 # VS Code
 .vscode/
 
+# Test output
+coverage-results*/
+e2e-screenshots/
+
 # OS
 .DS_Store
 Thumbs.db
