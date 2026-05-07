@@ -32,8 +32,8 @@ if (password is null)
 
 // Validate complexity
 var errors = new List<string>();
-if (password.Length < 16)
-    errors.Add("at least 16 characters");
+if (password.Length < 12)
+    errors.Add("at least 12 characters");
 if (!password.Any(char.IsUpper))
     errors.Add("at least one uppercase letter");
 if (!password.Any(char.IsLower))
@@ -55,11 +55,10 @@ if (errors.Count > 0)
 var hash = BCrypt.Net.BCrypt.HashPassword(password, 12);
 var line = $"AUTH_PASSWORD_HASH={hash}";
 
-// If --update-env not supplied, default to ../../.env relative to assembly location
+// If --update-env not supplied, default to .env in the current working directory (repo root)
 if (envPath is null)
 {
-    var asmDir = Path.GetDirectoryName(Environment.ProcessPath) ?? Directory.GetCurrentDirectory();
-    envPath = Path.GetFullPath(Path.Combine(asmDir, "..", "..", ".env"));
+    envPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), ".env"));
 }
 
 if (!File.Exists(envPath))

@@ -764,14 +764,14 @@ All configuration is via environment variables.
 **Generating / rotating a BCrypt hash** — use the included rotation utility (recommended):
 
 ```bash
-# Recommended: built-in .NET utility — prompts interactively
+# Recommended: built-in .NET utility — prompts interactively (run from repo root)
 dotnet run --project tools/RotatePassword
 
-# Non-interactive + auto-update .env in one step
+# Non-interactive + auto-update .env in one step (run from repo root)
 dotnet run --project tools/RotatePassword -- --password "YourStr0ngP@ss!" --update-env .env
-# Then restart the API: docker compose restart api
+# Then recreate the API container to reload env vars: docker compose up -d api
 
-# Alternative: Python
+# Alternative: Python (install bcrypt first if needed: pip install bcrypt)
 python3 -c "import bcrypt; print(bcrypt.hashpw(b'YourStr0ngP@ss!', bcrypt.gensalt(12)).decode())"
 
 # Alternative: Node.js (bcryptjs)
@@ -815,7 +815,7 @@ All management endpoints require a valid session cookie. The webhook receiver (`
 - Use firewall rules to restrict access to trusted IP ranges
 - Do not expose port 8088 to the public internet
 - SEQ (port 5342) is already `127.0.0.1`-bound — keep it that way
-- Rotate credentials using `tools/RotatePassword/`: `dotnet run --project tools/RotatePassword -- --password "<new>" --update-env .env && docker compose restart api`
+- Rotate credentials using `tools/RotatePassword/`: `dotnet run --project tools/RotatePassword -- --password "<new>" --update-env .env && docker compose up -d api`
 
 ### Single-Admin Deployment Model
 
