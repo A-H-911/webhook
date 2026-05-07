@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 5 | Token estimate: ~380 -->
+<!-- Generated: 2026-05-07 | Updated: batched retention cleanup (5k rows/loop), search constraints on Method/Path/IpAddress -->
 
 # Data Architecture
 
@@ -54,8 +54,17 @@ WebhookTokens (1) ──< WebhookRequests (many)
 - Migrations: `src/WebhookService.Infrastructure/Migrations/`
 - Initial migration: `20260504115509_InitialCreate`
 
-## Retention
-`RetentionCleanupService` deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`. Inactive tokens' requests are retained for audit trail.
+## Retention (Updated 2026-05-07)
+`RetentionCleanupService` deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`. 
+Cleanup is batched: delete 5k rows per loop iteration (prevents timeout on large datasets).
+Inactive tokens' requests are retained for audit trail.
+
+## Request Search (Updated 2026-05-07)
+Dashboard search box filters requests by:
+- Method (exact match): "GET", "POST", etc.
+- Path (substring): "/api/users"
+- IpAddress (substring): "192.168" (supports IPv6)
+- Minimum length: 2 characters to prevent broad scans
 
 ## Token Cache
 `IMemoryCache` key `"token:{guid}"` — 5-minute sliding expiration.

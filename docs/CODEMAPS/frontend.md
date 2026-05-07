@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 19 | Token estimate: ~480 -->
+<!-- Generated: 2026-05-07 | Updated: logout button, custom response headers JSON string validation, search empty state messages -->
 
 # Frontend Architecture
 
@@ -44,10 +44,24 @@ authGuard → AuthService.isLoggedIn() → true: pass | false: navigate('/login'
 APP_INITIALIZER → AuthService.initialize() → GET /api/auth/me (swallows errors)
 ```
 
-## HTTP Interceptor
+## HTTP Interceptor & Logout (Updated 2026-05-07)
 ```
 httpErrorInterceptor:
   401 response + path not /api/auth/ → AuthService.clearSession() + navigate('/login')
+
+Logout button:
+  Top toolbar (conditional): *ngIf="auth.isAuthenticated()" → click logout() → router.navigate(['/login'])
+  AuthService.logout() → POST /api/auth/logout + clearSession()
+```
+
+## Custom Response Dialog (Updated 2026-05-07)
+```
+Headers field validation:
+  ← User enters raw JSON string: "{\"X-Foo\":\"bar\"}"
+  → Dialog validates: JSON.parse(input) — must be valid JSON
+  → Send to PUT /api/tokens/{id}/custom-response as string (NOT object)
+  ← Backend parses headers JSON, deserializes to Dictionary<string, string>
+  Save rebuilds token signal from DTO instead of calling token.set(null)
 ```
 
 ## Timestamp Display

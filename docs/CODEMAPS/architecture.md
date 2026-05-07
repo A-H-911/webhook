@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 105 | Token estimate: ~650 -->
+<!-- Generated: 2026-05-07 | Updated: rate limiting, antiforgery, session revocation, per-token SSE cap (max 10), custom response headers deserialization -->
 
 # Architecture
 
@@ -78,3 +78,23 @@ SQL Server connection pool:
 - Automatic exponential backoff: 1s → 2s between retries
 - Request ReceivedAt timestamp: `datetimeoffset(7)` for millisecond precision (migration 20260506202000_PinReceivedAtPrecision)
 - Pagination ordering: `ReceivedAt DESC, THEN Id DESC` for deterministic results
+
+## Rate Limiting & Security (Updated 2026-05-07)
+
+- **Webhook receiver:** `webhook-receiver` fixed-window rate limiter (5/sec default, configurable via WebhookOptions.ReceiverRateLimitPerSecond)
+- **Login brute-force:** 5 attempts per 1 minute (fixed-window, 5/min)
+- **Antiforgery:** `X-XSRF-TOKEN` header required on state-changing requests; cookies are HttpOnly + Strict SameSite
+- **Session revocation:** In-memory store (`SessionRevocationStore`) — logout revokes all active sessions instantly
+- **SSE subscriber cap:** Max 10 concurrent connections per token; 11th request returns 429 Too Many Requests
+- **ForwardedHeaders:** `X-Forwarded-For`, `X-Forwarded-Proto` trusted from Nginx (ForwardLimit=2)
+- **Custom response headers:** Deserialized from JSON string; headers applied directly to `Response.Headers` in receiver
+
+## Rate Limiting & Security (as of 2026-05-07)
+
+- **Webhook receiver:** `webhook-receiver` fixed-window policy (permit limit + window duration from WebhookOptions)
+- **Login:** 5 attempts per 1 minute (brute-force protection)
+- **Antiforgery:** `X-XSRF-TOKEN` header required on state-changing requests
+- **Session revocation:** In-memory store (`SessionRevocationStore`) — logout revokes all active sessions
+- **SSE subscriber cap:** Max 10 concurrent connections per token; 11th request returns 429 Too Many Requests
+- **ForwardedHeaders:** `X-Forwarded-For`, `X-Forwarded-Proto` trusted from Nginx (ForwardLimit=2)
+- **Custom response headers:** Deserialized from JSON string at receiver; headers applied to webhook response

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 10 | Token estimate: ~400 -->
+<!-- Generated: 2026-05-07 | Updated: HashGen tool (renamed from RotatePassword), rate limiting, antiforgery, session revocation -->
 
 # Dependencies
 
@@ -17,8 +17,10 @@
 - `Microsoft.AspNetCore.Authentication.Cookies` — cookie-based session auth
 - `BCrypt.Net-Next` — password hash verification at login
 
-### Resilience
+### Resilience & Security (Updated 2026-05-07)
 - `Polly` — retry on startup DB migration (5 attempts, exponential backoff)
+- `Microsoft.AspNetCore.RateLimiting` — fixed-window rate limiter (login 5/min, webhook-receiver configurable)
+- `Microsoft.AspNetCore.Antiforgery` — CSRF protection, X-XSRF-TOKEN header validation
 
 ### Observability
 - `Serilog.AspNetCore` — structured logging
@@ -59,12 +61,23 @@
 | `frontend`  | Custom nginx               | 8088                  | Static SPA + reverse proxy       |
 | `api`       | Custom .NET                | 8080                  | Backend API                      |
 
+## Tools
+
+### HashGen (Renamed from RotatePassword, 2026-05-07)
+- CLI tool for generating BCrypt password hashes
+- Usage: `dotnet run --project tools/HashGen -- --password 'mypassword'`
+- Output: BCrypt hash (starts with `$2`)
+- Used to generate `AUTH_PASSWORD_HASH` for `.env` file
+- Never commit raw passwords; only store BCrypt hashes
+
 ## Key Config / Env
 ```
 WEBHOOK_BASE_URL          — public base URL (e.g. http://localhost:8088)
 AUTH_USERNAME             — single admin username
-AUTH_PASSWORD_HASH        — BCrypt hash ($2...)
+AUTH_PASSWORD_HASH        — BCrypt hash (generate via HashGen tool, starts with $2)
 CORS_ALLOWED_ORIGINS      — comma-separated (dev: http://localhost:4200)
+Webhook:ReceiverRateLimitPerSecond — receiver rate limit (default 5/sec)
+Webhook:RetentionDays     — request retention (default 7)
 ConnectionStrings__WebhookDb — MSSQL connection string
-SEQ_URL                   — Seq ingest endpoint
+SEQ_URL                   — Seq ingest endpoint (optional, localhost only)
 ```

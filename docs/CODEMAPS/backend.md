@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-06 | Files scanned: 115 | Token estimate: ~850 -->
+<!-- Generated: 2026-05-07 | Updated: rate limiting, session revocation, custom response header handling, per-token SSE cap -->
 
 # Backend Architecture
 
@@ -32,11 +32,13 @@ DELETE /api/tokens/{tokenId}/requests             → ClearRequestsCommand
 DELETE /api/tokens/{tokenId}/requests/{id}        → DeleteRequestCommand
 ```
 
-### Webhook Receiver (AllowAnonymous)
+### Webhook Receiver (AllowAnonymous, rate-limited)
 ```
 */webhook/{token:guid}   → WebhookController.Receive (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)
-  ├─ Active token:      200 OK + custom response (if set) + SSE notify
-  └─ Inactive token:    410 Gone + persists request for audit
+  [EnableRateLimiting("webhook-receiver")]
+  ├─ Active token:      custom status + custom headers + custom body (if set) + SSE notify + 200
+  ├─ Inactive token:    410 Gone + persists request for audit (no SSE)
+  └─ Rate limited:      429 Too Many Requests
 ```
 
 ### Health
@@ -47,7 +49,30 @@ GET /health/ready  → AllowAnonymous, SqlServer ping
 
 ## Middleware Chain (ordered)
 ```
-ForwardedHeaders → GlobalExceptionMiddleware → CORS → RateLimiter
+ForwardedHeaders → GlobalExceptionMiddleware → CORS → RateLimiter → Authentication → Authorization
+  ├─ GlobalExceptionMiddleware: SSE guard [if (Response.HasStarted) return;]
+  ├─ RateLimiter: login (5/min), webhook-receiver (per WebhookOptions)
+  ├─ Antiforgery: X-XSRF-TOKEN required on state-changing requests
+  └─ Authorization: fallback requires auth [AllowAnonymous] on public routes
+```
+
+## Receiver Custom Response (New 2026-05-07)
+- CustomResponse.Headers field stored as JSON string
+- Receiver: deserializes headers, writes to Response.Headers
+- Rate limiting: webhook-receiver policy applies → Authentication → Authorization
+  ├─ GlobalExceptionMiddleware: catches exceptions, guards SSE with `if (Response.HasStarted) return;`
+  ├─ RateLimiter: `login` policy (5/min), `webhook-receiver` policy (per WebhookOptions)
+  ├─ Antiforgery: `X-XSRF-TOKEN` required on POST/PUT/DELETE
+  └─ Authorization: fallback policy requires auth unless [AllowAnonymous]
+```
+
+## Receiver with Custom Response Headers (New 2026-05-07)
+
+When token has CustomResponse set:
+1. Headers field (JSON string) parsed via `JsonSerializer.Deserialize()`
+2. Each header key/value written directly to `Response.Headers`
+3. Response sent with custom status code + body + applied headers
+4. Receiver rate limit: `webhook-receiver` policy (enables resilience)
 → Authentication → Authorization → Controllers
 ```
 
