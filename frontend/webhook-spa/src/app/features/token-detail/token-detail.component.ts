@@ -240,9 +240,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
           });
         } else {
           this.tokenService.setCustomResponse(this.tokenId, result.dto).subscribe(() => {
-            this.token.update((tok) =>
-              tok ? { ...tok, customResponse: { ...result.dto } } : tok,
-            );
+            this.token.update((tok) => (tok ? { ...tok, customResponse: { ...result.dto } } : tok));
             this.snackBar.open('Custom response saved', 'OK', { duration: 3000 });
           });
         }
