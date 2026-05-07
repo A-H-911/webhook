@@ -12,6 +12,7 @@ namespace WebhookService.API.Controllers;
 
 [ApiController]
 [Route("api/tokens")]
+[AutoValidateAntiforgeryToken]
 public sealed class TokensController(IMediator mediator) : ControllerBase
 {
     [HttpGet]
