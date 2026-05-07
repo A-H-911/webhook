@@ -187,7 +187,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     this.dialog
       .open(ConfirmDialogComponent, {
         width: '340px',
-        data: { message: 'Clear all captured requests for this webhook URL?', confirmLabel: 'Clear' },
+        data: {
+          message: 'Clear all captured requests for this webhook URL?',
+          confirmLabel: 'Clear',
+        },
       })
       .afterClosed()
       .subscribe((confirmed: boolean) => {

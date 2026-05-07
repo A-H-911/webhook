@@ -72,7 +72,7 @@ type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'r
           placeholder='{"X-Custom":"value"}'
         ></textarea>
         @if (headersControl.hasError('invalidJson')) {
-          <mat-error>Must be valid JSON (e.g. {{"{"}}\"X-Foo\": \"bar\"{{"}}"}})</mat-error>
+          <mat-error>Must be valid JSON (e.g. {{ '{' }}"X-Foo": "bar"{{"}}"}})</mat-error>
         }
       </mat-form-field>
     </mat-dialog-content>
@@ -81,7 +81,9 @@ type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'r
         <button mat-button color="warn" (click)="reset()">Remove</button>
       }
       <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-flat-button color="primary" (click)="save()" [disabled]="headersControl.invalid">Save</button>
+      <button mat-flat-button color="primary" (click)="save()" [disabled]="headersControl.invalid">
+        Save
+      </button>
     </mat-dialog-actions>
   `,
 })
