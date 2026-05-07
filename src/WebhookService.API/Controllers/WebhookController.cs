@@ -82,6 +82,17 @@ public sealed class WebhookController(
         if (custom is not null)
         {
             Response.StatusCode = custom.StatusCode;
+            if (!string.IsNullOrWhiteSpace(custom.Headers))
+            {
+                try
+                {
+                    var extraHeaders = JsonSerializer.Deserialize<Dictionary<string, string>>(custom.Headers);
+                    if (extraHeaders is not null)
+                        foreach (var (key, value) in extraHeaders)
+                            Response.Headers.TryAdd(key, value);
+                }
+                catch (JsonException) { }
+            }
             return custom.Body is not null
                 ? Content(custom.Body, custom.ContentType)
                 : new EmptyResult();

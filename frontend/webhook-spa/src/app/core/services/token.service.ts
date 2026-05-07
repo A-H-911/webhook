@@ -23,8 +23,8 @@ export class TokenService {
     return this.http.delete<void>(`/api/tokens/${id}`);
   }
 
-  setCustomResponse(tokenId: string, dto: SetCustomResponseDto): Observable<Token> {
-    return this.http.put<Token>(`/api/tokens/${tokenId}/custom-response`, dto);
+  setCustomResponse(tokenId: string, dto: SetCustomResponseDto): Observable<void> {
+    return this.http.put<void>(`/api/tokens/${tokenId}/custom-response`, dto);
   }
 
   resetCustomResponse(tokenId: string): Observable<void> {

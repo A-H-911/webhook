@@ -239,8 +239,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
             this.snackBar.open('Custom response removed', 'OK', { duration: 3000 });
           });
         } else {
-          this.tokenService.setCustomResponse(this.tokenId, result.dto).subscribe((updated) => {
-            this.token.set(updated);
+          this.tokenService.setCustomResponse(this.tokenId, result.dto).subscribe(() => {
+            this.token.update((tok) =>
+              tok ? { ...tok, customResponse: { ...result.dto } } : tok,
+            );
             this.snackBar.open('Custom response saved', 'OK', { duration: 3000 });
           });
         }
@@ -259,9 +261,12 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   formatHeaders(raw: string): string {
     try {
-      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      const parsed = JSON.parse(raw) as Record<string, string | string[]>;
       return Object.entries(parsed)
-        .flatMap(([name, values]) => values.map((v) => `${name}: ${v}`))
+        .flatMap(([name, value]) => {
+          const vals = Array.isArray(value) ? value : [value];
+          return vals.map((v) => `${name}: ${v}`);
+        })
         .join('\n');
     } catch {
       return raw;

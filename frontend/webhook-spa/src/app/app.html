@@ -11,6 +11,11 @@
   >
     <mat-icon>{{ theme.isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
   </button>
+  @if (auth.isAuthenticated()) {
+    <button mat-icon-button matTooltip="Sign out" aria-label="Sign out" (click)="logout()">
+      <mat-icon>logout</mat-icon>
+    </button>
+  }
 </mat-toolbar>
 
 <main class="app-content">
