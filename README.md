@@ -757,6 +757,7 @@ All configuration is via environment variables.
 | `RETENTION_DAYS` | No | `7` | 0–365 | Days to keep requests; `0` = keep forever |
 | `MAX_REQUEST_SIZE_MB` | No | `5` | 1–100 | Max accepted request body size in MB |
 | `AUTH_SESSION_HOURS` | No | `8` | 1–168 | Session cookie lifetime in hours |
+| `WEBHOOK__ReceiverRateLimitPerSecond` | No | `250` | 1–10000 | Max requests per second per token on the webhook receiver; uses token-bucket algorithm |
 | `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
 | `NGROK_AUTHTOKEN` | No | — | ngrok auth token | Required only when using `docker-compose.ngrok.yml` |
 
@@ -791,7 +792,7 @@ All management endpoints require a valid session cookie. The webhook receiver (`
 
 **Session cookie properties:**
 - `HttpOnly` — not accessible from JavaScript; mitigates XSS token theft
-- `SameSite=Lax` — blocks cross-site POST CSRF while allowing bookmarks and link navigation
+- `SameSite=Strict` — blocks cross-site requests including safe ones (navigation); stricter than `Lax` for better security
 - `Secure` flag follows `X-Forwarded-Proto` via `ForwardedHeaders` middleware — set to HTTPS in production
 - Sliding expiration: `AUTH_SESSION_HOURS` (default 8 h)
 
