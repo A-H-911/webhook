@@ -54,8 +54,8 @@
         <div class="list-spinner"><mat-spinner diameter="36" /></div>
       } @else if (requests().length === 0) {
         <div class="list-empty">
-          <mat-icon>inbox</mat-icon>
-          <p>No requests yet. Send an HTTP request to the URL above.</p>
+          <mat-icon>{{ search ? 'search_off' : 'inbox' }}</mat-icon>
+          <p>{{ search ? 'No matching requests found.' : 'No requests yet. Send an HTTP request to the URL above.' }}</p>
         </div>
       } @else {
         <div class="request-list">
