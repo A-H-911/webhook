@@ -180,8 +180,9 @@ Files where knowing their location saves substantial search time:
 | `src/WebhookService.Infrastructure/Sse/SseNotifier.cs` | `ConcurrentDictionary` of `Channel<SseEvent>` per token; `TryWrite` O(1) |
 | `src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs` | `PeriodicTimer` (24h) cleanup; `IServiceScopeFactory` for scoped DbContext |
 | `docker/sqlserver/entrypoint.sh` | Polls until SQL Server is ready, then runs `init.sql` |
-| `docker/frontend/nginx.conf` | Reverse proxy config; `proxy_buffering off` for SSE |
+| `docker/frontend/nginx.conf` | Reverse proxy config; `proxy_buffering off` for SSE; security headers (HSTS, CSP, Permissions-Policy) |
 | `frontend/webhook-spa/src/app/services/sse.service.ts` | Angular SSE client; maps wire `event: request` → `eventType: 'new-request'` |
+| `tools/RotatePassword/Program.cs` | BCrypt password-rotation CLI — generates `AUTH_PASSWORD_HASH` for `.env` |
 
 ---
 
@@ -268,7 +269,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | `.AsNoTracking()` on all repository reads | Removing it enables EF Core change tracking on read-only queries; mutations in the same scope may unexpectedly persist phantom changes. |
 | **Always** persist WebhookRequest, even from inactive tokens | Callers rely on audit trail; removing persistence breaks compliance logging and makes 410 signal ambiguous. |
 | Receiver uses `GetByTokenIncludingInactiveAsync`, not `GetByTokenAsync` | Dashboard queries filter `IsActive=1` but receiver needs both states. Swapping methods causes inactive tokens to return 404 instead of 410. |
-| `WHERE TokenId = @tokenId` in GetRequestById / ExportRequest / DeleteRequest | Removing it enables IDOR — any token holder can read or delete another token's requests. **Security regression.** |
+| `tokenId` parameter in GetRequestById / ExportRequest / DeleteRequest repository methods | C# repository methods always include `tokenId` as a query filter (parameterized EF Core), preventing cross-token access. This is **not** raw SQL `WHERE` enforcement — it is enforced in C# method signatures. Single-admin deployment by design — no per-user tenancy. Removing the `tokenId` filter enables IDOR. |
 | Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph. |
 | `[AllowAnonymous]` on `WebhookController` | External callers never have credentials. Removing it breaks all webhook delivery. |
 | `[AllowAnonymous]` on `AuthController` | Login endpoint must be reachable before a session exists. Removing it creates an unbreakable auth loop. |
@@ -280,7 +281,8 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Interceptor excludes `/api/auth/` from the 401→`/login` redirect | `POST /api/auth/login` returns 401 on bad credentials. Redirecting to `/login` on that 401 creates an infinite redirect loop in the login form. |
 | `EventSource({ withCredentials: true })` in `SseService` | Dev mode is cross-origin (`:4200` → `:8080`). Without `withCredentials`, the browser blocks the auth cookie and SSE gets 401 silently. |
 | `.AllowCredentials()` in the dev CORS policy | Required for cross-origin cookie delivery in dev mode. Without it, the browser discards the `Set-Cookie` header and login appears to succeed but leaves no session. |
-| `AUTH_PASSWORD_HASH` is a BCrypt hash, never plaintext | The validator checks the `$2` prefix at startup. Plaintext fails validation and the app refuses to start. |
+| `AUTH_PASSWORD_HASH` is a BCrypt hash, never plaintext | The validator checks the `$2` prefix at startup. Plaintext fails validation and the app refuses to start. Use `tools/RotatePassword/` to generate a new hash: `dotnet run --project tools/RotatePassword -- --password '<strong>'`. Never commit the hash to source control. |
+| `Headers`, `Body`, `IpAddress` are persisted **unredacted** by design | Single-admin trust model — only one admin account exists. All captured data (including `Cookie` headers and vendor HMAC secrets) is visible to the admin in the UI, DB, and SEQ. This is intentional. Never add automatic redaction without explicit approval from the deployment owner. |
 | `[mat-dialog-close]="null"` (with binding) on the Cancel button in `CreateTokenDialogComponent` | `mat-dialog-close` without a value binding closes with `""` (empty string), not `undefined`. The dashboard guard uses `== null`, so `""` bypasses it and silently creates a no-description token. |
 
 ---
@@ -300,7 +302,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Angular proxy 404 during `npm start` | Backend not running on port 8080 | `dotnet run --project src/WebhookService.API` first |
 | New command handler never invoked | Validator constructor throws, or handler in wrong assembly | Verify validator has at least one `RuleFor`; handler must be in Application project |
 | EF migration fails with "pending model changes" | Model changed without adding a migration | `dotnet ef migrations add <Name> --project src/WebhookService.Infrastructure --startup-project src/WebhookService.API` |
-| API exits at startup with `ValidateOptionsResult.Fail` | `AUTH_USERNAME` or `AUTH_PASSWORD_HASH` missing or hash lacks `$2` prefix | Set both vars in `.env`; regenerate hash with `python3 -c "import bcrypt; print(bcrypt.hashpw(b'pass', bcrypt.gensalt(12)).decode())"` |
+| API exits at startup with `ValidateOptionsResult.Fail` | `AUTH_USERNAME` or `AUTH_PASSWORD_HASH` missing or hash lacks `$2` prefix | Set both vars in `.env`; use `dotnet run --project tools/RotatePassword -- --password '<pass>'` to generate the hash (or `python3 -c "import bcrypt; print(bcrypt.hashpw(b'pass', bcrypt.gensalt(12)).decode())"`) |
 | App always redirects to `/login` even after correct credentials | `AUTH_PASSWORD_HASH` is plaintext, not a BCrypt hash | Replace with BCrypt hash; see §10 Configuration Reference in README |
 | SSE 401 in dev mode (`:4200` → `:8080`) | `withCredentials` removed from `EventSource` call in `SseService` | Restore `{ withCredentials: true }` |
 | Login succeeds but session not retained (dev cross-origin) | `.AllowCredentials()` removed from dev CORS policy | Add `.AllowCredentials()` to the CORS policy in `Program.cs` |
