@@ -18,8 +18,10 @@ internal sealed class WebhookRequestRepository : IWebhookRequestRepository
     {
         var query = _db.WebhookRequests.AsNoTracking().Where(r => r.TokenId == tokenId);
 
-        if (!string.IsNullOrWhiteSpace(search))
+        if (!string.IsNullOrWhiteSpace(search) && search.Length >= 2)
             query = query.Where(r =>
+                r.Method == search ||
+                r.Path.Contains(search) ||
                 (r.Headers != null && r.Headers.Contains(search)) ||
                 (r.Body != null && r.Body.Contains(search)));
 
@@ -53,8 +55,18 @@ internal sealed class WebhookRequestRepository : IWebhookRequestRepository
 
     public async Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, CancellationToken ct = default)
     {
-        return await _db.WebhookRequests
-            .Where(r => r.ReceivedAt < cutoff)
-            .ExecuteDeleteAsync(ct);
+        const int batchSize = 1000;
+        var total = 0;
+        int deleted;
+        do
+        {
+            deleted = await _db.WebhookRequests
+                .Where(r => r.ReceivedAt < cutoff)
+                .Take(batchSize)
+                .ExecuteDeleteAsync(ct);
+            total += deleted;
+        }
+        while (deleted == batchSize);
+        return total;
     }
 }
