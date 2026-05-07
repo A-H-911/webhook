@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Threading.RateLimiting;
 using Testcontainers.MsSql;
 using WebhookService.Domain.Services;
@@ -82,6 +84,9 @@ public sealed class AuthWebAppFactory : WebApplicationFactory<Program>, IAsyncLi
             });
 
             // Production cookie authentication is preserved — no TestAuthHandler override.
+
+            services.RemoveAll<IAntiforgery>();
+            services.AddSingleton<IAntiforgery, NoOpAntiforgery>();
         });
     }
 

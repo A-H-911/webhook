@@ -121,12 +121,12 @@ builder.Services.AddRateLimiter(opts =>
     opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
-// CSRF protection — Angular reads XSRF-TOKEN cookie and echoes as X-XSRF-TOKEN header
+// CSRF protection — Angular reads XSRF-TOKEN cookie and echoes as X-XSRF-TOKEN header.
+// The framework antiforgery cookie uses its default name (.AspNetCore.Antiforgery.*) so it
+// does not collide with the XSRF-TOKEN cookie that carries the RequestToken for Angular.
 builder.Services.AddAntiforgery(o =>
 {
     o.HeaderName = "X-XSRF-TOKEN";
-    o.Cookie.Name = "XSRF-TOKEN";
-    o.Cookie.HttpOnly = false; // must be JS-readable
     o.Cookie.SameSite = SameSiteMode.Strict;
 });
 
@@ -144,7 +144,9 @@ if (origins.Length > 0)
 }
 
 builder.Services.AddMemoryCache();
-builder.Services.AddControllers();
+// AddControllersWithViews (instead of AddControllers) registers AutoValidateAntiforgeryTokenAuthorizationFilter
+// as an internal service — required by [AutoValidateAntiforgeryToken] on TokensController/RequestsController.
+builder.Services.AddControllersWithViews();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 

@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.MsSql;
 using WebhookService.Domain.Services;
 using WebhookService.Infrastructure.Persistence;
@@ -56,6 +58,9 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
 
             services.AddAuthentication(defaultScheme: "Test")
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
+
+            services.RemoveAll<IAntiforgery>();
+            services.AddSingleton<IAntiforgery, NoOpAntiforgery>();
         });
     }
 
