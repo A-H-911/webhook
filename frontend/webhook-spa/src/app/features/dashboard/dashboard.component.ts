@@ -11,6 +11,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { TokenService } from '../../core/services/token.service';
 import { Token } from '../../core/models/token.model';
 import { CreateTokenDialogComponent } from './create-token-dialog.component';
+import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -67,11 +68,22 @@ export class DashboardComponent implements OnInit {
 
   delete(token: Token, event: MouseEvent): void {
     event.stopPropagation();
-    if (!confirm('Delete this webhook URL? All captured requests will be removed.')) return;
-    this.tokenService.deleteToken(token.id).subscribe(() => {
-      this.tokens.update((list) => list.filter((t) => t.id !== token.id));
-      this.snackBar.open('Deleted', 'OK', { duration: 3000 });
-    });
+    this.dialog
+      .open(ConfirmDialogComponent, {
+        width: '340px',
+        data: {
+          message: 'Delete this webhook URL? All captured requests will be removed.',
+          confirmLabel: 'Delete',
+        },
+      })
+      .afterClosed()
+      .subscribe((confirmed: boolean) => {
+        if (!confirmed) return;
+        this.tokenService.deleteToken(token.id).subscribe(() => {
+          this.tokens.update((list) => list.filter((t) => t.id !== token.id));
+          this.snackBar.open('Deleted', 'OK', { duration: 3000 });
+        });
+      });
   }
 
   copyUrl(token: Token, event: MouseEvent): void {

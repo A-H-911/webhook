@@ -15,24 +15,48 @@ export class SseService {
       let es: EventSource | null = null;
       let reconnectDelay = 1000;
       let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let stableTimer: ReturnType<typeof setTimeout> | null = null;
       let closed = false;
+
+      const clearStableTimer = () => {
+        if (stableTimer !== null) {
+          clearTimeout(stableTimer);
+          stableTimer = null;
+        }
+      };
 
       const open = () => {
         if (closed) return;
         es = new EventSource(`/api/tokens/${tokenId}/sse`, { withCredentials: true });
 
         es.onopen = () => {
-          reconnectDelay = 1000;
+          // Reset backoff only after 10 s of stability to avoid storm-reconnects (e.g. ngrok flap)
+          stableTimer = setTimeout(() => {
+            reconnectDelay = 1000;
+            stableTimer = null;
+          }, 10_000);
           subscriber.next({ eventType: 'connected' });
         };
 
         // Backend sends `event: request` (matches SseNotifier.NotifyAsync)
         es.addEventListener('request', (e: MessageEvent) => {
+          let parsed: unknown;
           try {
-            subscriber.next({ eventType: 'new-request', data: JSON.parse(e.data) });
+            parsed = JSON.parse(e.data);
           } catch {
-            // malformed SSE payload — skip
+            console.warn('[SseService] Received non-JSON SSE data, ignoring', e.data);
+            return;
           }
+          if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            !('id' in parsed) ||
+            !('receivedAt' in parsed)
+          ) {
+            console.warn('[SseService] Unexpected SSE payload shape, ignoring', parsed);
+            return;
+          }
+          subscriber.next({ eventType: 'new-request', data: parsed as RequestSummary });
         });
 
         es.addEventListener('token-deleted', () => {
@@ -43,11 +67,12 @@ export class SseService {
         });
 
         es.onerror = () => {
+          clearStableTimer();
           subscriber.next({ eventType: 'disconnected' });
           es?.close();
           if (!closed) {
             reconnectTimer = setTimeout(() => {
-              reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+              reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
               open();
             }, reconnectDelay);
           }
@@ -58,6 +83,7 @@ export class SseService {
 
       return () => {
         closed = true;
+        clearStableTimer();
         if (reconnectTimer !== null) clearTimeout(reconnectTimer);
         es?.close();
       };

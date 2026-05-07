@@ -4,9 +4,10 @@ export interface RequestSummary {
   method: string;
   path: string;
   receivedAt: string;
-  contentType: string | null;
-  sizeBytes: number;
-  ipAddress: string;
+  contentType?: string | null;
+  sizeBytes?: number;
+  ipAddress?: string;
+  statusCode?: number;
 }
 
 export interface PagedResult<T> {

@@ -22,6 +22,7 @@ import { Token, SetCustomResponseDto } from '../../core/models/token.model';
 import { RequestSummary } from '../../core/models/request-summary.model';
 import { RequestDetail } from '../../core/models/request-detail.model';
 import { CustomResponseDialogComponent } from '../custom-response/custom-response-dialog.component';
+import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 
 const PAGE_SIZE = 20;
 
@@ -68,6 +69,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   search = '';
 
   readonly totalPages = computed(() => Math.ceil(this.total() / PAGE_SIZE) || 1);
+  readonly localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   get tokenId(): string {
     return this.route.snapshot.paramMap.get('id') ?? '';
@@ -159,12 +161,20 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   deleteRequest(req: RequestSummary, event: MouseEvent): void {
     event.stopPropagation();
-    if (!confirm('Delete this request?')) return;
-    this.requestService.deleteRequest(this.tokenId, req.id).subscribe(() => {
-      this.requests.update((list) => list.filter((r) => r.id !== req.id));
-      this.total.update((n) => n - 1);
-      if (this.selectedDetail()?.id === req.id) this.selectedDetail.set(null);
-    });
+    this.dialog
+      .open(ConfirmDialogComponent, {
+        width: '340px',
+        data: { message: 'Delete this request?', confirmLabel: 'Delete' },
+      })
+      .afterClosed()
+      .subscribe((confirmed: boolean) => {
+        if (!confirmed) return;
+        this.requestService.deleteRequest(this.tokenId, req.id).subscribe(() => {
+          this.requests.update((list) => list.filter((r) => r.id !== req.id));
+          this.total.update((n) => n - 1);
+          if (this.selectedDetail()?.id === req.id) this.selectedDetail.set(null);
+        });
+      });
   }
 
   exportSelected(): void {
@@ -174,20 +184,39 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   }
 
   clearAll(): void {
-    if (!confirm('Clear all captured requests for this webhook URL?')) return;
-    this.requestService.clearRequests(this.tokenId).subscribe(() => {
-      this.requests.set([]);
-      this.total.set(0);
-      this.selectedDetail.set(null);
-      this.snackBar.open('All requests cleared', 'OK', { duration: 3000 });
-    });
+    this.dialog
+      .open(ConfirmDialogComponent, {
+        width: '340px',
+        data: { message: 'Clear all captured requests for this webhook URL?', confirmLabel: 'Clear' },
+      })
+      .afterClosed()
+      .subscribe((confirmed: boolean) => {
+        if (!confirmed) return;
+        this.requestService.clearRequests(this.tokenId).subscribe(() => {
+          this.requests.set([]);
+          this.total.set(0);
+          this.selectedDetail.set(null);
+          this.snackBar.open('All requests cleared', 'OK', { duration: 3000 });
+        });
+      });
   }
 
   deleteToken(): void {
-    if (!confirm('Delete this webhook URL and all its requests permanently?')) return;
-    this.tokenService
-      .deleteToken(this.tokenId)
-      .subscribe(() => this.router.navigate(['/dashboard']));
+    this.dialog
+      .open(ConfirmDialogComponent, {
+        width: '340px',
+        data: {
+          message: 'Delete this webhook URL and all its requests permanently?',
+          confirmLabel: 'Delete',
+        },
+      })
+      .afterClosed()
+      .subscribe((confirmed: boolean) => {
+        if (!confirmed) return;
+        this.tokenService
+          .deleteToken(this.tokenId)
+          .subscribe(() => this.router.navigate(['/dashboard']));
+      });
   }
 
   openCustomResponse(): void {
@@ -227,7 +256,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   formatHeaders(raw: string): string {
     try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
+      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      return Object.entries(parsed)
+        .flatMap(([name, values]) => values.map((v) => `${name}: ${v}`))
+        .join('\n');
     } catch {
       return raw;
     }
@@ -237,7 +269,8 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     if (!detail.body) return '';
     if (detail.isBodyBase64) {
       try {
-        return atob(detail.body);
+        const bytes = Uint8Array.from(atob(detail.body), (c) => c.charCodeAt(0));
+        return new TextDecoder('utf-8').decode(bytes);
       } catch {
         return detail.body;
       }
@@ -247,5 +280,23 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     } catch {
       return detail.body;
     }
+  }
+
+  showDateHeader(index: number): boolean {
+    const reqs = this.requests();
+    if (index === 0) return true;
+    const curr = new Date(reqs[index].receivedAt).toDateString();
+    const prev = new Date(reqs[index - 1].receivedAt).toDateString();
+    return curr !== prev;
+  }
+
+  getDateLabel(receivedAt: string): string {
+    const d = new Date(receivedAt);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 }

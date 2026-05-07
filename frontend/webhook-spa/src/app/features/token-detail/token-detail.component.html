@@ -59,7 +59,10 @@
         </div>
       } @else {
         <div class="request-list">
-          @for (req of requests(); track req.id) {
+          @for (req of requests(); track req.id; let i = $index) {
+            @if (showDateHeader(i)) {
+              <div class="date-separator">{{ getDateLabel(req.receivedAt) }}</div>
+            }
             <div class="request-row"
                  [class.selected]="selectedDetail()?.id === req.id"
                  (click)="selectRequest(req)">
@@ -67,7 +70,8 @@
               <div class="req-info">
                 <span class="req-path">{{ req.path }}</span>
                 <span class="req-meta">
-                  {{ req.receivedAt | date:'HH:mm:ss.SSS' }} &middot; {{ req.sizeBytes }} B &middot; {{ req.ipAddress }}
+                  {{ req.receivedAt | date:'HH:mm:ss.SSS' }}<span class="tz-hint"> ({{ localTz }})</span>
+                  &middot; {{ req.sizeBytes ?? 0 }} B &middot; {{ req.ipAddress ?? '' }}
                 </span>
               </div>
               <button mat-icon-button matTooltip="Delete" class="row-action"
@@ -115,7 +119,7 @@
 
           <div class="detail-grid">
             <span class="detail-label">Received</span>
-            <span>{{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss.SSS' }}</span>
+            <span>{{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss.SSS' }} <span class="tz-hint">({{ localTz }})</span></span>
 
             <span class="detail-label">IP</span>
             <span>{{ selectedDetail()!.ipAddress }}</span>

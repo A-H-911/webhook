@@ -1,11 +1,31 @@
 import { Component, inject } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  FormControl,
+  ValidatorFn,
+  AbstractControl,
+  ValidationErrors,
+} from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatSelectModule } from '@angular/material/select';
 import { CustomResponse, SetCustomResponseDto } from '../../core/models/token.model';
+
+function jsonValidator(): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const val: string = control.value ?? '';
+    if (!val.trim()) return null;
+    try {
+      JSON.parse(val);
+      return null;
+    } catch {
+      return { invalidJson: true };
+    }
+  };
+}
 
 type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'reset' };
 
@@ -14,6 +34,7 @@ type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'r
   standalone: true,
   imports: [
     FormsModule,
+    ReactiveFormsModule,
     MatDialogModule,
     MatFormFieldModule,
     MatInputModule,
@@ -46,10 +67,13 @@ type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'r
         <mat-label>Extra Headers (JSON object)</mat-label>
         <textarea
           matInput
-          [(ngModel)]="headersJson"
+          [formControl]="headersControl"
           rows="3"
           placeholder='{"X-Custom":"value"}'
         ></textarea>
+        @if (headersControl.hasError('invalidJson')) {
+          <mat-error>Must be valid JSON (e.g. {{"{"}}\"X-Foo\": \"bar\"{{"}}"}})</mat-error>
+        }
       </mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
@@ -57,7 +81,7 @@ type DialogResult = { action: 'save'; dto: SetCustomResponseDto } | { action: 'r
         <button mat-button color="warn" (click)="reset()">Remove</button>
       }
       <button mat-button mat-dialog-close>Cancel</button>
-      <button mat-flat-button color="primary" (click)="save()">Save</button>
+      <button mat-flat-button color="primary" (click)="save()" [disabled]="headersControl.invalid">Save</button>
     </mat-dialog-actions>
   `,
 })
@@ -70,16 +94,11 @@ export class CustomResponseDialogComponent {
   statusCode = this.data?.statusCode ?? 200;
   contentType = this.data?.contentType ?? 'application/json';
   body = this.data?.body ?? '';
-  headersJson = this.data?.headers ?? '{}';
+  readonly headersControl = new FormControl(this.data?.headers ?? '{}', [jsonValidator()]);
 
   save(): void {
-    const rawHeaders = this.headersJson.trim() || '{}';
-    try {
-      JSON.parse(rawHeaders);
-    } catch {
-      return;
-    }
-
+    if (this.headersControl.invalid) return;
+    const rawHeaders = (this.headersControl.value ?? '').trim() || '{}';
     const dto: SetCustomResponseDto = {
       statusCode: this.statusCode,
       contentType: this.contentType.trim() || 'application/json',

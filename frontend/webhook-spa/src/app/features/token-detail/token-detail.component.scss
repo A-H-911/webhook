@@ -252,6 +252,23 @@
   text-overflow: ellipsis;
 }
 
+.date-separator {
+  padding: 4px 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mat-sys-on-surface-variant);
+  background: var(--mat-sys-surface-variant);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+}
+
+.tz-hint {
+  font-size: 0.65rem;
+  color: var(--mat-sys-on-surface-variant);
+  opacity: 0.75;
+}
+
 @media (max-width: 700px) {
   .panels {
     flex-direction: column;
