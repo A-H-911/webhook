@@ -7,8 +7,37 @@ namespace WebhookService.Infrastructure.Sse;
 
 internal sealed class SseNotifier : ISseNotifier
 {
+    private const int MaxSubscribersPerToken = 10;
+
     private readonly ConcurrentDictionary<Guid, List<Channel<SseEvent>>> _subscribers = new();
+    private readonly ConcurrentDictionary<Guid, int> _subscriberCounts = new();
     private readonly Lock _lock = new();
+
+    public bool TrySubscribe(Guid tokenId)
+    {
+        lock (_lock)
+        {
+            var current = _subscriberCounts.GetOrAdd(tokenId, 0);
+            if (current >= MaxSubscribersPerToken)
+                return false;
+            _subscriberCounts[tokenId] = current + 1;
+            return true;
+        }
+    }
+
+    public void Unsubscribe(Guid tokenId)
+    {
+        lock (_lock)
+        {
+            if (_subscriberCounts.TryGetValue(tokenId, out var count))
+            {
+                if (count <= 1)
+                    _subscriberCounts.TryRemove(tokenId, out _);
+                else
+                    _subscriberCounts[tokenId] = count - 1;
+            }
+        }
+    }
 
     public async IAsyncEnumerable<SseEvent> SubscribeAsync(
         Guid tokenId,

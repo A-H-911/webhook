@@ -17,4 +17,8 @@ internal sealed class TestNullSseNotifier : ISseNotifier
         => Task.CompletedTask;
 
     public void NotifyTokenDeleted(Guid tokenId) { }
+
+    public bool TrySubscribe(Guid tokenId) => true;
+
+    public void Unsubscribe(Guid tokenId) { }
 }

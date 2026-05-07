@@ -18,20 +18,33 @@ public sealed class SseController(ISseNotifier sseNotifier, IWebhookTokenReposit
             return;
         }
 
-        Response.Headers.ContentType = "text/event-stream";
-        Response.Headers.CacheControl = "no-cache";
-        Response.Headers.Connection = "keep-alive";
-
-        var retryFrame = Encoding.UTF8.GetBytes("retry: 5000\n\n");
-        await Response.Body.WriteAsync(retryFrame, ct);
-        await Response.Body.FlushAsync(ct);
-
-        await foreach (var evt in sseNotifier.SubscribeAsync(tokenId, ct))
+        if (!sseNotifier.TrySubscribe(tokenId))
         {
-            var line = $"event: {evt.EventName}\ndata: {evt.Data}\n\n";
-            var bytes = Encoding.UTF8.GetBytes(line);
-            await Response.Body.WriteAsync(bytes, ct);
+            Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            return;
+        }
+
+        try
+        {
+            Response.Headers.ContentType = "text/event-stream";
+            Response.Headers.CacheControl = "no-cache";
+            Response.Headers.Connection = "keep-alive";
+
+            var retryFrame = Encoding.UTF8.GetBytes("retry: 5000\n\n");
+            await Response.Body.WriteAsync(retryFrame, ct);
             await Response.Body.FlushAsync(ct);
+
+            await foreach (var evt in sseNotifier.SubscribeAsync(tokenId, ct))
+            {
+                var line = $"event: {evt.EventName}\ndata: {evt.Data}\n\n";
+                var bytes = Encoding.UTF8.GetBytes(line);
+                await Response.Body.WriteAsync(bytes, ct);
+                await Response.Body.FlushAsync(ct);
+            }
+        }
+        finally
+        {
+            sseNotifier.Unsubscribe(tokenId);
         }
     }
 }
