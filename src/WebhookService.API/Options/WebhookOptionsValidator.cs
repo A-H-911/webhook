@@ -18,6 +18,10 @@ public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
             return ValidateOptionsResult.Fail(
                 "Webhook:RetentionDays must be between 0 and 365.");
 
+        if (options.ReceiverRateLimitPerSecond < 1 || options.ReceiverRateLimitPerSecond > 10_000)
+            return ValidateOptionsResult.Fail(
+                "Webhook:ReceiverRateLimitPerSecond must be between 1 and 10000.");
+
         return ValidateOptionsResult.Success;
     }
 }

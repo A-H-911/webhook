@@ -103,14 +103,17 @@ builder.Services.AddRateLimiter(opts =>
         policy.QueueLimit = 0;
     });
 
-    // Per-token fixed window: 200 requests/min. Partitioned by token GUID from route.
+    // Per-token token-bucket: default 250 req/s. Override via WEBHOOK__ReceiverRateLimitPerSecond.
+    var rateLimit = webhookOptions.ReceiverRateLimitPerSecond;
     opts.AddPolicy("webhook-receiver", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
+        RateLimitPartition.GetTokenBucketLimiter(
             httpContext.GetRouteValue("token")?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
+            _ => new TokenBucketRateLimiterOptions
             {
-                PermitLimit = 200,
-                Window = TimeSpan.FromMinutes(1),
+                TokenLimit = rateLimit,
+                TokensPerPeriod = rateLimit,
+                ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+                AutoReplenishment = true,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit = 0
             }));
