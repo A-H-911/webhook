@@ -22,8 +22,7 @@ internal sealed class WebhookRequestRepository : IWebhookRequestRepository
             query = query.Where(r =>
                 r.Method == search ||
                 r.Path.Contains(search) ||
-                (r.Headers != null && r.Headers.Contains(search)) ||
-                (r.Body != null && r.Body.Contains(search)));
+                (r.IpAddress != null && r.IpAddress.Contains(search)));
 
         var total = await query.CountAsync(ct);
 
