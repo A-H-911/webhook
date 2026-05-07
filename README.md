@@ -760,17 +760,21 @@ All configuration is via environment variables.
 | `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
 | `NGROK_AUTHTOKEN` | No | — | ngrok auth token | Required only when using `docker-compose.ngrok.yml` |
 
-**Generating a BCrypt hash** (run once, store the output as `AUTH_PASSWORD_HASH`):
+**Generating / rotating a BCrypt hash** — use the included rotation utility (recommended):
 
 ```bash
-# Python
+# Recommended: built-in .NET utility — prompts interactively
+dotnet run --project tools/RotatePassword
+
+# Non-interactive + auto-update .env in one step
+dotnet run --project tools/RotatePassword -- --password "YourStr0ngP@ss!" --update-env .env
+# Then restart the API: docker compose restart api
+
+# Alternative: Python
 python3 -c "import bcrypt; print(bcrypt.hashpw(b'YourStr0ngP@ss!', bcrypt.gensalt(12)).decode())"
 
-# Node.js (bcryptjs)
+# Alternative: Node.js (bcryptjs)
 node -e "const b=require('bcryptjs'); console.log(b.hashSync('YourStr0ngP@ss!',12))"
-
-# htpasswd
-htpasswd -bnBC 12 "" "YourStr0ngP@ss!" | tr -d ':\n'
 ```
 
 **Startup validation:** The API process exits immediately at startup if `WEBHOOK_BASE_URL`, `AUTH_USERNAME`, or `AUTH_PASSWORD_HASH` are missing/invalid, or if `MAX_REQUEST_SIZE_MB`, `RETENTION_DAYS`, or `AUTH_SESSION_HOURS` are outside their valid ranges. Silent misconfiguration is worse than a fast failure.
@@ -810,11 +814,22 @@ All management endpoints require a valid session cookie. The webhook receiver (`
 - Use firewall rules to restrict access to trusted IP ranges
 - Do not expose port 8088 to the public internet
 - SEQ (port 5342) is already `127.0.0.1`-bound — keep it that way
-- Rotate credentials by updating `AUTH_PASSWORD_HASH` and restarting the API container
+- Rotate credentials using `tools/RotatePassword/`: `dotnet run --project tools/RotatePassword -- --password "<new>" --update-env .env && docker compose restart api`
+
+### Single-Admin Deployment Model
+
+This application is designed for a **single administrator**. There is one login account (`AUTH_USERNAME` / `AUTH_PASSWORD_HASH`) and no per-user data isolation. All captured data is accessible to that admin account. This is intentional — the system is a personal/team webhook debugging tool, not a multi-tenant SaaS.
 
 ### Stored Data
 
-Captured request data may include full headers (potentially `Authorization`, `Cookie`, API keys), full request bodies (potentially PII or credentials), and caller IP addresses. Apply your organization's data retention and access control policies accordingly. The `RETENTION_DAYS` variable controls automatic cleanup.
+Captured request data is persisted **unredacted** — this includes full headers (including `Cookie`, `Authorization`, and vendor HMAC secrets such as `X-Webhook-Secret`), full request bodies, and caller IP addresses. SEQ logs are also unfiltered. This is by design under the single-admin trust model. Ensure the deployment is network-access-controlled. The `RETENTION_DAYS` variable controls automatic cleanup.
+
+### Additional Security Controls
+
+- **CSRF protection:** Anti-forgery token via `X-XSRF-TOKEN` header. Angular's `HttpClient` reads the `XSRF-TOKEN` cookie and echoes the header automatically on state-changing requests.
+- **Session revocation:** Logout invalidates the session server-side immediately via an in-memory revocation store. A server restart clears the revocation set (acceptable for single-admin use; re-login is required).
+- **Rate limiting:** The webhook receiver is rate-limited per token; the login endpoint is rate-limited per real client IP (requires `X-Forwarded-For` from nginx).
+- **Security headers:** nginx sets HSTS, CSP, Permissions-Policy, X-Frame-Options: DENY, X-Content-Type-Options: nosniff, and Referrer-Policy on all responses.
 
 ---
 
