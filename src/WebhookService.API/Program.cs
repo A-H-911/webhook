@@ -1,3 +1,6 @@
+using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -8,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Polly;
 using Serilog;
 using WebhookService.API.Middleware;
+using WebhookService.API.Services;
 using WebhookService.Application.Options;
 using WebhookService.Application;
 using WebhookService.Infrastructure;
@@ -38,6 +42,9 @@ builder.Services
     .AddSingleton<IValidateOptions<AuthOptions>, AuthOptionsValidator>()
     .AddOptionsWithValidateOnStart<AuthOptions>();
 
+// Session revocation — in-memory store; single admin, so no distributed store needed
+builder.Services.AddSingleton<SessionRevocationStore>();
+
 // Cookie authentication — cookies are the only browser-native mechanism that works with SSE
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -64,6 +71,17 @@ builder.Services
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return Task.CompletedTask;
         };
+        cookie.Events.OnValidatePrincipal = ctx =>
+        {
+            var sid = ctx.Principal?.FindFirstValue("sid");
+            var store = ctx.HttpContext.RequestServices.GetRequiredService<SessionRevocationStore>();
+            if (sid is not null && store.IsRevoked(sid))
+            {
+                ctx.RejectPrincipal();
+                ctx.ShouldRenew = false;
+            }
+            return Task.CompletedTask;
+        };
     });
 
 // Global fallback policy — all endpoints require auth unless explicitly [AllowAnonymous]
@@ -74,17 +92,39 @@ builder.Services.AddAuthorization(opts =>
         .Build();
 });
 
-// Rate limiting — protect login endpoint from brute-force
+// Rate limiting — login brute-force + per-token receiver flood protection
 builder.Services.AddRateLimiter(opts =>
 {
     opts.AddFixedWindowLimiter("login", policy =>
     {
         policy.PermitLimit = 5;
         policy.Window = TimeSpan.FromMinutes(1);
-        policy.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        policy.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
         policy.QueueLimit = 0;
     });
+
+    // Per-token fixed window: 200 requests/min. Partitioned by token GUID from route.
+    opts.AddPolicy("webhook-receiver", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.GetRouteValue("token")?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 200,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+
     opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+
+// CSRF protection — Angular reads XSRF-TOKEN cookie and echoes as X-XSRF-TOKEN header
+builder.Services.AddAntiforgery(o =>
+{
+    o.HeaderName = "X-XSRF-TOKEN";
+    o.Cookie.Name = "XSRF-TOKEN";
+    o.Cookie.HttpOnly = false; // must be JS-readable
+    o.Cookie.SameSite = SameSiteMode.Strict;
 });
 
 // Application + Infrastructure layers
@@ -113,6 +153,13 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+// L4: Fail fast on misconfigured CORS origins
+foreach (var origin in origins)
+{
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out _))
+        throw new InvalidOperationException($"Cors:AllowedOrigins contains invalid URI: '{origin}'");
+}
+
 // UseForwardedHeaders MUST come before routing/CORS so real client IP is resolved.
 // Restrict to private RFC-1918 ranges (Docker bridge networks, LAN proxies).
 var forwardedOptions = new ForwardedHeadersOptions
@@ -135,6 +182,20 @@ if (origins.Length > 0)
 app.UseRateLimiter();
 
 app.UseAuthentication();
+
+// Emit XSRF-TOKEN cookie for authenticated sessions; Angular HttpClientXsrfModule reads it.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated == true)
+    {
+        var af = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+        var tokens = af.GetAndStoreTokens(ctx);
+        ctx.Response.Cookies.Append("XSRF-TOKEN", tokens.RequestToken!,
+            new CookieOptions { HttpOnly = false, SameSite = SameSiteMode.Strict });
+    }
+    await next();
+});
+
 app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())

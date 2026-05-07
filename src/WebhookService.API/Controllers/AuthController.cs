@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using WebhookService.API.Options;
+using WebhookService.API.Services;
 
 namespace WebhookService.API.Controllers;
 
@@ -13,6 +14,7 @@ namespace WebhookService.API.Controllers;
 [Route("api/auth")]
 public sealed class AuthController(
     IOptions<AuthOptions> authOptions,
+    SessionRevocationStore revocationStore,
     ILogger<AuthController> logger) : ControllerBase
 {
     [HttpPost("login")]
@@ -35,7 +37,12 @@ public sealed class AuthController(
             return Unauthorized(new { error = "Invalid credentials." });
         }
 
-        var claims = new[] { new Claim(ClaimTypes.Name, opts.Username) };
+        var sid = Guid.NewGuid().ToString("N");
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, opts.Username),
+            new Claim("sid", sid)
+        };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
@@ -48,6 +55,10 @@ public sealed class AuthController(
     [AllowAnonymous]
     public async Task<IActionResult> Logout()
     {
+        var sid = User.FindFirstValue("sid");
+        if (sid is not null)
+            revocationStore.Revoke(sid);
+
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Ok();
     }
