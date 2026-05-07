@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Caching.Memory;
 using WebhookService.Domain.Entities;
 using WebhookService.Domain.Repositories;
@@ -23,6 +24,7 @@ public sealed class WebhookController(
 
     [Route("webhook/{token:guid}")]
     [HttpGet, HttpPost, HttpPut, HttpPatch, HttpDelete, HttpHead, HttpOptions]
+    [EnableRateLimiting("webhook-receiver")]
     public async Task<IActionResult> Receive(Guid token, CancellationToken ct)
     {
         var webhookToken = await ResolveTokenAsync(token, ct);
