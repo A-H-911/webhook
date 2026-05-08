@@ -1,6 +1,7 @@
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using NSubstitute;
+using WebhookService.Application.Options;
 using WebhookService.Application.Tokens.Queries.GetTokens;
 using WebhookService.Domain.Entities;
 using WebhookService.Domain.Repositories;
@@ -10,11 +11,14 @@ namespace WebhookService.UnitTests.Application.Tokens;
 public sealed class GetTokensQueryHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
-    private readonly IConfiguration _config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["Webhook:BaseUrl"] = "https://example.com" })
-        .Build();
+    private readonly IOptions<WebhookOptions> _options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
+    {
+        BaseUrl = "https://example.com",
+        MaxRequestSizeMb = 5,
+        RetentionDays = 7
+    });
 
-    private GetTokensQueryHandler CreateHandler() => new(_repo, _config);
+    private GetTokensQueryHandler CreateHandler() => new(_repo, _options);
 
     [Fact]
     public async Task Handle_ReturnsMappedDtos_ForAllActiveTokens()
@@ -43,10 +47,10 @@ public sealed class GetTokensQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_FallsBackToEmpty_WhenBaseUrlMissing()
+    public async Task Handle_ProducesRelativeUrls_WhenBaseUrlIsEmpty()
     {
-        var config = new ConfigurationBuilder().Build();
-        var handler = new GetTokensQueryHandler(_repo, config);
+        var options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions { BaseUrl = "", MaxRequestSizeMb = 5, RetentionDays = 7 });
+        var handler = new GetTokensQueryHandler(_repo, options);
         var token = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
         _repo.GetAllActiveAsync(Arg.Any<CancellationToken>()).Returns(new List<WebhookToken> { token });
 

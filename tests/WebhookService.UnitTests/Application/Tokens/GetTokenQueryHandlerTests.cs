@@ -1,6 +1,7 @@
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using NSubstitute;
+using WebhookService.Application.Options;
 using WebhookService.Application.Tokens.Queries.GetToken;
 using WebhookService.Domain.Entities;
 using WebhookService.Domain.Repositories;
@@ -10,11 +11,14 @@ namespace WebhookService.UnitTests.Application.Tokens;
 public sealed class GetTokenQueryHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
-    private readonly IConfiguration _config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["Webhook:BaseUrl"] = "https://example.com" })
-        .Build();
+    private readonly IOptions<WebhookOptions> _options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
+    {
+        BaseUrl = "https://example.com",
+        MaxRequestSizeMb = 5,
+        RetentionDays = 7
+    });
 
-    private GetTokenQueryHandler CreateHandler() => new(_repo, _config);
+    private GetTokenQueryHandler CreateHandler() => new(_repo, _options);
 
     private static WebhookToken MakeToken(Guid id) => new()
     {
@@ -49,10 +53,10 @@ public sealed class GetTokenQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_FallsBackToEmpty_WhenBaseUrlMissing()
+    public async Task Handle_ProducesRelativeUrl_WhenBaseUrlIsEmpty()
     {
-        var config = new ConfigurationBuilder().Build();
-        var handler = new GetTokenQueryHandler(_repo, config);
+        var options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions { BaseUrl = "", MaxRequestSizeMb = 5, RetentionDays = 7 });
+        var handler = new GetTokenQueryHandler(_repo, options);
         var id = Guid.NewGuid();
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(MakeToken(id));
 
@@ -60,5 +64,25 @@ public sealed class GetTokenQueryHandlerTests
 
         result.Should().NotBeNull();
         result!.WebhookUrl.Should().StartWith("/webhook/");
+    }
+
+    [Fact]
+    public async Task Handle_TrimsTrailingSlashFromBaseUrl()
+    {
+        var options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
+        {
+            BaseUrl = "https://example.com/",
+            MaxRequestSizeMb = 5,
+            RetentionDays = 7
+        });
+        var handler = new GetTokenQueryHandler(_repo, options);
+        var id = Guid.NewGuid();
+        _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(MakeToken(id));
+
+        var result = await handler.Handle(new GetTokenQuery(id), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.WebhookUrl.Should().NotContain("//webhook/");
+        result.WebhookUrl.Should().Contain("https://example.com/webhook/");
     }
 }
