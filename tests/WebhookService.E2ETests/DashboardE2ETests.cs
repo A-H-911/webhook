@@ -169,6 +169,26 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
     }
 
     [Fact]
+    public async Task TokenDetail_WebhookUrl_UsesConfiguredBaseUrl()
+    {
+        // Regression: webhook URL must use WEBHOOK_BASE_URL, not the old localhost:5000 default.
+        // E2E_BASE_URL and WEBHOOK_BASE_URL must be the same value in any correctly configured stack.
+        var (tokenId, apiWebhookUrl) = await CreateTokenViaApiAsync("base-url-regression-test");
+
+        // Assert API-level: the URL returned by POST /api/tokens starts with the configured base
+        Assert.StartsWith(BaseUrl, apiWebhookUrl);
+
+        // Assert UI-level: the URL displayed on the token detail page matches the API value
+        var page = await NewPageAsync();
+        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+
+        var displayedUrl = await page.InnerTextAsync("code.webhook-url");
+        Assert.StartsWith(BaseUrl, displayedUrl.Trim());
+        Assert.Equal(apiWebhookUrl, displayedUrl.Trim());
+    }
+
+    [Fact]
     public async Task TokenDetail_IncomingRequest_AppearsInList()
     {
         var (tokenId, webhookUrl) = await CreateTokenViaApiAsync("incoming-request-test");
