@@ -3,7 +3,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: "Development"
       Cors__AllowedOrigins: "http://localhost:4200"
-      Webhook__BaseUrl: "http://localhost:8088"
+      Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
       Auth__Username: "${AUTH_USERNAME:-admin}"
       Auth__PasswordHash: "${AUTH_PASSWORD_HASH}"
       Auth__SessionHours: "${AUTH_SESSION_HOURS:-8}"

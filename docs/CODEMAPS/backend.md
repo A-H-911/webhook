@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-07 | Updated: rate limiting, session revocation, custom response header handling, per-token SSE cap -->
+<!-- Generated: 2026-05-08 | Updated: GetToken/GetTokens handlers now use IOptions<WebhookOptions> instead of IConfiguration -->
 
 # Backend Architecture
 
@@ -105,13 +105,21 @@ src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs
 
 ## Options (validated at startup)
 ```
-Webhook:BaseUrl          (required) — used to build webhook URLs
+Webhook:BaseUrl          (required, must be non-empty — validator rejects blank)
+                         Default in appsettings.json: "" (forces explicit config)
+                         Dev default in appsettings.Development.json: http://localhost:8080
+                         Production: set WEBHOOK_BASE_URL env var
 Webhook:RetentionDays    — requests older than N days cleaned up
 Webhook:MaxRequestSizeMb — Kestrel body size limit
 Auth:Username            (required)
 Auth:PasswordHash        (required, must start with $2 — BCrypt)
 Auth:SessionHours        — cookie sliding expiry
 ```
+
+## WebhookUrl Computation
+`webhookUrl` is NOT stored in the database. Computed at read time in `WebhookTokenExtensions.ToDto(baseUrl)`.
+Both `GetTokenQueryHandler` and `GetTokensQueryHandler` use `IOptions<WebhookOptions>` (not raw `IConfiguration`)
+to access `BaseUrl` — consistent with `CreateTokenCommandHandler`.
 
 ## IDOR Protection
 `GetRequestById`, `ExportRequest`, `DeleteRequest` all include `WHERE TokenId = @tokenId`

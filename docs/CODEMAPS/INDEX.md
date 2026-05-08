@@ -1,6 +1,6 @@
 # Webhook Service — Codemaps Index
 
-**Last Updated:** 2026-05-07 (all codemaps refreshed with rate limiting, antiforgery, session revocation, per-token SSE cap, custom response headers deserialization, HashGen tool rename, batched retention cleanup, search constraints)
+**Last Updated:** 2026-05-08 (webhook URL base URL fix: IOptions consistency in query handlers, appsettings defaults, docker-compose.override.yml hardcode bug)
 
 ---
 
@@ -46,6 +46,23 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 3. See **dependencies.md** for all external services
 
 ---
+
+## Recent Changes (as of 2026-05-08)
+
+### Backend Updates
+- **GetTokenQueryHandler.cs** — switched from `IConfiguration` to `IOptions<WebhookOptions>` (consistent with `CreateTokenCommandHandler`)
+- **GetTokensQueryHandler.cs** — same change; all three token query/command handlers now use the validated Options pattern
+- **appsettings.json** — `Webhook:BaseUrl` default changed from `http://localhost:5000` → `""` (startup validator now fires when `WEBHOOK_BASE_URL` not set)
+- **appsettings.Development.json** — `Webhook:BaseUrl` changed from `http://localhost:5000` → `http://localhost:8080` (matches Angular dev proxy port)
+
+### Infrastructure Updates
+- **docker-compose.override.yml** — `Webhook__BaseUrl` was hardcoded as `http://localhost:8088`, silently overriding `.env`. Fixed to `${WEBHOOK_BASE_URL}` so both local and ngrok modes work correctly.
+- **.env.example** — updated with two documented examples (local docker-compose and ngrok mode) plus note that URL is computed at read time
+
+### Test Updates
+- **DashboardE2ETests.cs** — added `TokenDetail_WebhookUrl_UsesConfiguredBaseUrl` regression test (verifies webhook URL uses `WEBHOOK_BASE_URL`, not localhost)
+- **DashboardE2EFixture** — added XSRF-TOKEN priming GET after login (fixes antiforgery header for write API calls in E2E)
+- **TokenDetail_DeleteToken_RedirectsToDashboard** — fixed to use Angular Material `ConfirmDialogComponent` selector instead of `page.Dialog` (browser dialog never fires)
 
 ## Recent Changes (as of 2026-05-07)
 

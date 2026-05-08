@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-07 | Updated: HashGen tool (renamed from RotatePassword), rate limiting, antiforgery, session revocation -->
+<!-- Generated: 2026-05-08 | Updated: WEBHOOK_BASE_URL config notes; docker-compose.override.yml fix -->
 
 # Dependencies
 
@@ -63,16 +63,28 @@
 
 ## Tools
 
-### HashGen (Renamed from RotatePassword, 2026-05-07)
+### RotatePassword
 - CLI tool for generating BCrypt password hashes
-- Usage: `dotnet run --project tools/HashGen -- --password 'mypassword'`
+- Usage: `dotnet run --project tools/RotatePassword -- --password 'mypassword'`
+- Or interactively: `dotnet run --project tools/RotatePassword`
+- Or with auto-update: `dotnet run --project tools/RotatePassword -- --password 'pass' --update-env .env`
 - Output: BCrypt hash (starts with `$2`)
 - Used to generate `AUTH_PASSWORD_HASH` for `.env` file
 - Never commit raw passwords; only store BCrypt hashes
 
 ## Key Config / Env
 ```
-WEBHOOK_BASE_URL          — public base URL (e.g. http://localhost:8088)
+WEBHOOK_BASE_URL          — public base URL for generated webhook URLs
+                            Local:  http://localhost:8088
+                            ngrok:  https://your-domain.ngrok.app
+                            appsettings.json default: "" (empty — validator fires if unset)
+                            appsettings.Development.json default: http://localhost:8080
+
+⚠  docker-compose.override.yml — was previously hardcoding http://localhost:8088 for
+   Webhook__BaseUrl, overriding the .env value. Fixed 2026-05-08 to use ${WEBHOOK_BASE_URL}.
+   If the wrong URL appears, ensure the container was recreated after updating .env:
+   docker compose up -d --force-recreate api
+
 AUTH_USERNAME             — single admin username
 AUTH_PASSWORD_HASH        — BCrypt hash (generate via HashGen tool, starts with $2)
 CORS_ALLOWED_ORIGINS      — comma-separated (dev: http://localhost:4200)

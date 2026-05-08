@@ -652,7 +652,7 @@ WebhookService.sln
 │
 ├── Dockerfile                           ← API: multi-stage .NET SDK → ASP.NET 10 runtime
 ├── docker-compose.yml
-├── docker-compose.override.yml          ← local dev: CORS for :4200, BaseUrl for :8088
+├── docker-compose.override.yml          ← local dev: CORS for :4200, BaseUrl from ${WEBHOOK_BASE_URL}
 └── .env.example
 ```
 
@@ -734,13 +734,15 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: "Development"
       Cors__AllowedOrigins:   "http://localhost:4200"
-      Webhook__BaseUrl:       "http://localhost:8088"
+      Webhook__BaseUrl:       "${WEBHOOK_BASE_URL}"   # reads from .env — supports both local and ngrok
   sqlserver:
     ports:
       - "1433:1433"
 ```
 
 Use with: `docker compose -f docker-compose.yml -f docker-compose.override.yml up -d`
+
+> **Note:** After changing `WEBHOOK_BASE_URL` in `.env`, run `docker compose up -d --force-recreate api` to pick up the new value. `docker compose up -d` alone will not recreate a running container.
 
 ---
 

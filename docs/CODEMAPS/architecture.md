@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-07 | Updated: rate limiting, antiforgery, session revocation, per-token SSE cap (max 10), custom response headers deserialization -->
+<!-- Generated: 2026-05-08 | Updated: docker-compose.override.yml WEBHOOK_BASE_URL fix; IOptions<WebhookOptions> consistency in query handlers -->
 
 # Architecture
 
@@ -89,12 +89,13 @@ SQL Server connection pool:
 - **ForwardedHeaders:** `X-Forwarded-For`, `X-Forwarded-Proto` trusted from Nginx (ForwardLimit=2)
 - **Custom response headers:** Deserialized from JSON string; headers applied directly to `Response.Headers` in receiver
 
-## Rate Limiting & Security (as of 2026-05-07)
+## Deployment Notes (Updated 2026-05-08)
 
-- **Webhook receiver:** `webhook-receiver` fixed-window policy (permit limit + window duration from WebhookOptions)
-- **Login:** 5 attempts per 1 minute (brute-force protection)
-- **Antiforgery:** `X-XSRF-TOKEN` header required on state-changing requests
-- **Session revocation:** In-memory store (`SessionRevocationStore`) — logout revokes all active sessions
-- **SSE subscriber cap:** Max 10 concurrent connections per token; 11th request returns 429 Too Many Requests
-- **ForwardedHeaders:** `X-Forwarded-For`, `X-Forwarded-Proto` trusted from Nginx (ForwardLimit=2)
-- **Custom response headers:** Deserialized from JSON string at receiver; headers applied to webhook response
+**WEBHOOK_BASE_URL precedence** (highest to lowest):
+1. `docker-compose.override.yml` → `Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"` (reads from `.env`)
+2. `docker-compose.yml` → `Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"` (same env var)
+3. `appsettings.Development.json` → `"BaseUrl": "http://localhost:8080"` (dev fallback)
+4. `appsettings.json` → `"BaseUrl": ""` (empty — startup validator fires if unset)
+
+⚠ `docker-compose.override.yml` previously hardcoded `http://localhost:8088` here, silently overriding `.env`.
+Fixed 2026-05-08. After `.env` change, always `docker compose up -d --force-recreate api` to pick up new value.
