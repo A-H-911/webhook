@@ -39,3 +39,6 @@ Thumbs.db
 # Claude Code local settings
 .claude/settings.local.json
 .claude/plans/
+
+# Local investigation reports (not part of the project)
+ecc-observer-fix-report.md
