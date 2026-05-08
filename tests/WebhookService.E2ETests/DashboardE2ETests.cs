@@ -37,9 +37,20 @@ public sealed class DashboardE2EFixture : IAsyncLifetime
         AuthContext = await Browser.NewContextAsync();
         await LoginAsync(AuthContext);
 
-        var handler = new HttpClientHandler { UseCookies = true, CookieContainer = new CookieContainer() };
+        var cookies = new CookieContainer();
+        var handler = new HttpClientHandler { UseCookies = true, CookieContainer = cookies };
         ApiClient = new HttpClient(handler) { BaseAddress = new Uri(BaseUrl) };
         await AuthenticateApiClientAsync();
+
+        // The XSRF-TOKEN cookie is only emitted on authenticated responses — the login
+        // endpoint itself runs unauthenticated (cookie not yet in the request). Fire a
+        // cheap GET on an authenticated endpoint so the middleware appends XSRF-TOKEN,
+        // then read it from the container and pin it as the default request header.
+        // [AutoValidateAntiforgeryToken] on write endpoints requires the header to match.
+        await ApiClient.GetAsync("/api/tokens");
+        var xsrf = cookies.GetCookies(new Uri(BaseUrl))["XSRF-TOKEN"]?.Value;
+        if (xsrf is not null)
+            ApiClient.DefaultRequestHeaders.Add("X-XSRF-TOKEN", xsrf);
     }
 
     public async Task DisposeAsync()
@@ -214,12 +225,15 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
         await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
         await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
 
-        // Wire up dialog handler BEFORE clicking — the app shows window.confirm() on delete
-        page.Dialog += async (_, dialog) => await dialog.AcceptAsync();
-
         var deleteButton = page.GetByRole(AriaRole.Button,
             new() { NameRegex = new Regex("delete.*url", RegexOptions.IgnoreCase) });
-        await deleteButton.ClickAsync();
+        await deleteButton.ClickAsync(new LocatorClickOptions { Force = true });
+
+        // Delete uses Angular Material ConfirmDialogComponent — not window.confirm().
+        // The warn-colored button in mat-dialog-actions is the "Confirm" button.
+        var confirmButton = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+        await confirmButton.WaitForAsync(new() { Timeout = 5_000 });
+        await confirmButton.ClickAsync();
 
         // Poll until the Angular router navigates back to the dashboard
         await Assertions.Expect(page).ToHaveURLAsync(new Regex("/dashboard"),
