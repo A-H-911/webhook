@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.MsSql;
+using Testcontainers.Redis;
 using WebhookService.Domain.Services;
 using WebhookService.Infrastructure.Persistence;
 
@@ -18,9 +19,11 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
         .Build();
 
+    private readonly RedisContainer _redis = new RedisBuilder().Build();
+
     public async Task InitializeAsync()
     {
-        await _db.StartAsync();
+        await Task.WhenAll(_db.StartAsync(), _redis.StartAsync());
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -30,6 +33,7 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:WebhookDb"] = _db.GetConnectionString(),
+                ["ConnectionStrings:Redis"] = _redis.GetConnectionString(),
                 ["Webhook:BaseUrl"] = "https://test.example.com",
                 ["Webhook:RetentionDays"] = "7",
                 ["Webhook:MaxRequestSizeMb"] = "5",
@@ -56,6 +60,9 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
 
             services.AddSingleton<ISseNotifier, TestNullSseNotifier>();
 
+            services.RemoveAll<IRequestQueuePublisher>();
+            services.AddSingleton<IRequestQueuePublisher, FakeRequestQueuePublisher>();
+
             services.AddAuthentication(defaultScheme: "Test")
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", _ => { });
 
@@ -66,7 +73,7 @@ public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifeti
 
     async Task IAsyncLifetime.DisposeAsync()
     {
-        await _db.DisposeAsync();
+        await Task.WhenAll(_db.DisposeAsync().AsTask(), _redis.DisposeAsync().AsTask());
     }
 
 }

@@ -18,7 +18,12 @@ internal sealed class TestNullSseNotifier : ISseNotifier
 
     public void NotifyTokenDeleted(Guid tokenId) { }
 
-    public bool TrySubscribe(Guid tokenId) => true;
+    public Task<bool> TrySubscribeAsync(Guid tokenId, CancellationToken ct = default)
+        => Task.FromResult(true);
 
-    public void Unsubscribe(Guid tokenId) { }
+    public Task UnsubscribeAsync(Guid tokenId, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task RefreshSubscriptionAsync(Guid tokenId, CancellationToken ct = default)
+        => Task.CompletedTask;
 }

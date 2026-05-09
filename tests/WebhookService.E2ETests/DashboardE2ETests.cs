@@ -107,9 +107,16 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
     {
         var unauthContext = await fixture.Browser.NewContextAsync();
         var page = await unauthContext.NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/dashboard");
-        await Assertions.Expect(page).ToHaveURLAsync(new Regex("/login"));
-        await unauthContext.DisposeAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            await Assertions.Expect(page).ToHaveURLAsync(new Regex("/login"));
+        }
+        finally
+        {
+            await page.CloseAsync();
+            await unauthContext.DisposeAsync();
+        }
     }
 
     // --- Dashboard page ---
@@ -118,51 +125,61 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
     public async Task Dashboard_LoadsWithWebhookHeading()
     {
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/dashboard");
-        await page.WaitForSelectorAsync("h1");
-        var heading = await page.InnerTextAsync("h1");
-        Assert.Contains("Webhook", heading);
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            await page.WaitForSelectorAsync("h1");
+            var heading = await page.InnerTextAsync("h1");
+            Assert.Contains("Webhook", heading);
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
     public async Task Dashboard_NewUrlButton_IsVisible()
     {
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/dashboard");
-        var button = page.GetByRole(AriaRole.Button, new() { Name = "New URL" });
-        await button.WaitForAsync();
-        await Assertions.Expect(button).ToBeVisibleAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            var button = page.GetByRole(AriaRole.Button, new() { Name = "New URL" });
+            await button.WaitForAsync();
+            await Assertions.Expect(button).ToBeVisibleAsync();
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
     public async Task Dashboard_CreateToken_AppearsAsCardInList()
     {
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/dashboard");
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
+            await page.WaitForSelectorAsync("mat-dialog-container");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
 
-        await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
-        await page.WaitForSelectorAsync("mat-dialog-container");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
-
-        await page.WaitForSelectorAsync("mat-card", new() { Timeout = 10_000 });
-        var cards = await page.QuerySelectorAllAsync("mat-card");
-        Assert.NotEmpty(cards);
+            await page.WaitForSelectorAsync("mat-card", new() { Timeout = 10_000 });
+            var cards = await page.QuerySelectorAllAsync("mat-card");
+            Assert.NotEmpty(cards);
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
     public async Task Dashboard_CardClick_NavigatesToTokenDetailPage()
     {
-        // Pre-create a token so a card is guaranteed to exist
         await CreateTokenViaApiAsync("nav-test");
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/dashboard");
-        await page.WaitForSelectorAsync("mat-card");
-
-        // Force=true bypasses Playwright hit-testing that would land on an overlapping icon button
-        await page.Locator("mat-card").First.ClickAsync(new LocatorClickOptions { Force = true });
-
-        // ToHaveURLAsync polls until the Angular SPA navigation commits (no page-load event needed)
-        await Assertions.Expect(page).ToHaveURLAsync(new Regex("/tokens/"));
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            await page.WaitForSelectorAsync("mat-card");
+            await page.Locator("mat-card").First.ClickAsync(new LocatorClickOptions { Force = true });
+            await Assertions.Expect(page).ToHaveURLAsync(new Regex("/tokens/"));
+        }
+        finally { await page.CloseAsync(); }
     }
 
     // --- Token detail page ---
@@ -172,31 +189,39 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
     {
         var (tokenId, _) = await CreateTokenViaApiAsync("detail-url-test");
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
-
-        var urlText = await page.InnerTextAsync("code.webhook-url");
-        Assert.Contains("/webhook/", urlText);
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+            await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+            var urlText = await page.InnerTextAsync("code.webhook-url");
+            Assert.Contains("/webhook/", urlText);
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
     public async Task TokenDetail_WebhookUrl_UsesConfiguredBaseUrl()
     {
-        // Regression: webhook URL must use WEBHOOK_BASE_URL, not the old localhost:5000 default.
-        // E2E_BASE_URL and WEBHOOK_BASE_URL must be the same value in any correctly configured stack.
+        // Regression: webhook URL must use WEBHOOK_BASE_URL (not the old localhost:5000 default).
+        // WEBHOOK_BASE_URL and E2E_BASE_URL may differ (e.g. ngrok vs localhost), so we validate
+        // that the URL is absolute, contains the /webhook/ path, and that the API and UI agree.
         var (tokenId, apiWebhookUrl) = await CreateTokenViaApiAsync("base-url-regression-test");
 
-        // Assert API-level: the URL returned by POST /api/tokens starts with the configured base
-        Assert.StartsWith(BaseUrl, apiWebhookUrl);
+        Assert.True(
+            Uri.IsWellFormedUriString(apiWebhookUrl, UriKind.Absolute),
+            $"Expected an absolute webhook URL from the API, got: {apiWebhookUrl}");
+        Assert.Contains("/webhook/", apiWebhookUrl);
+        Assert.DoesNotContain("localhost:5000", apiWebhookUrl);
 
-        // Assert UI-level: the URL displayed on the token detail page matches the API value
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
-
-        var displayedUrl = await page.InnerTextAsync("code.webhook-url");
-        Assert.StartsWith(BaseUrl, displayedUrl.Trim());
-        Assert.Equal(apiWebhookUrl, displayedUrl.Trim());
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+            await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+            var displayedUrl = (await page.InnerTextAsync("code.webhook-url")).Trim();
+            Assert.Equal(apiWebhookUrl, displayedUrl);
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
@@ -209,12 +234,14 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
         await ApiClient.PostAsync(new Uri(webhookUrl).PathAndQuery, content);
 
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-
-        // Request rows render with class .request-row (not table rows)
-        await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
-        var rows = await page.QuerySelectorAllAsync(".request-row");
-        Assert.NotEmpty(rows);
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            var rows = await page.QuerySelectorAllAsync(".request-row");
+            Assert.NotEmpty(rows);
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
@@ -222,21 +249,22 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
     {
         var (tokenId, _) = await CreateTokenViaApiAsync("delete-ui-test");
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
-        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{tokenId}");
+            await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
 
-        var deleteButton = page.GetByRole(AriaRole.Button,
-            new() { NameRegex = new Regex("delete.*url", RegexOptions.IgnoreCase) });
-        await deleteButton.ClickAsync(new LocatorClickOptions { Force = true });
+            var deleteButton = page.GetByRole(AriaRole.Button,
+                new() { NameRegex = new Regex("delete.*url", RegexOptions.IgnoreCase) });
+            await deleteButton.ClickAsync(new LocatorClickOptions { Force = true });
 
-        // Delete uses Angular Material ConfirmDialogComponent — not window.confirm().
-        // The warn-colored button in mat-dialog-actions is the "Confirm" button.
-        var confirmButton = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
-        await confirmButton.WaitForAsync(new() { Timeout = 5_000 });
-        await confirmButton.ClickAsync();
+            var confirmButton = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            await confirmButton.WaitForAsync(new() { Timeout = 5_000 });
+            await confirmButton.ClickAsync();
 
-        // Poll until the Angular router navigates back to the dashboard
-        await Assertions.Expect(page).ToHaveURLAsync(new Regex("/dashboard"),
-            new PageAssertionsToHaveURLOptions { Timeout = 10_000 });
+            await Assertions.Expect(page).ToHaveURLAsync(new Regex("/dashboard"),
+                new PageAssertionsToHaveURLOptions { Timeout = 10_000 });
+        }
+        finally { await page.CloseAsync(); }
     }
 }

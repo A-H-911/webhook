@@ -1,6 +1,6 @@
-﻿using FluentAssertions;
-using Microsoft.Extensions.Caching.Memory;
+using FluentAssertions;
 using NSubstitute;
+using WebhookService.Application.Caching;
 using WebhookService.Application.Tokens.Commands.DeleteToken;
 using WebhookService.Domain.Entities;
 using WebhookService.Domain.Repositories;
@@ -12,9 +12,9 @@ public sealed class DeleteTokenCommandHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
     private readonly ISseNotifier _sse = Substitute.For<ISseNotifier>();
-    private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
+    private readonly ITokenCache _tokenCache = Substitute.For<ITokenCache>();
 
-    private DeleteTokenCommandHandler CreateHandler() => new(_repo, _sse, _cache);
+    private DeleteTokenCommandHandler CreateHandler() => new(_repo, _sse, _tokenCache);
 
     [Fact]
     public async Task Handle_ReturnsFalse_WhenTokenNotFound()
@@ -46,12 +46,11 @@ public sealed class DeleteTokenCommandHandlerTests
     {
         var id = Guid.NewGuid();
         var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
-        _cache.Set($"token:{token.Token}", token);
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new DeleteTokenCommand(id), CancellationToken.None);
 
         _sse.Received(1).NotifyTokenDeleted(id);
-        _cache.TryGetValue($"token:{token.Token}", out _).Should().BeFalse();
+        await _tokenCache.Received(1).RemoveAsync(token.Token, Arg.Any<CancellationToken>());
     }
 }

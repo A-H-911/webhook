@@ -1,4 +1,8 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using StackExchange.Redis;
 using WebhookService.Domain.Services;
 using WebhookService.Infrastructure.Sse;
 
@@ -6,74 +10,87 @@ namespace WebhookService.UnitTests.Infrastructure.Sse;
 
 public sealed class SseNotifierTests
 {
-    // ── TrySubscribe / Unsubscribe ──────────────────────────────────────────
+    private static (SseNotifier notifier, IDatabase db) CreateNotifier(long luaResult = 1)
+    {
+        var db = Substitute.For<IDatabase>();
+        var muxer = Substitute.For<IConnectionMultiplexer>();
+        var logger = NullLogger<SseNotifier>.Instance;
+        muxer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
+        db.ScriptEvaluateAsync(
+                Arg.Any<string>(),
+                Arg.Any<RedisKey[]?>(),
+                Arg.Any<RedisValue[]?>(),
+                Arg.Any<CommandFlags>())
+            .Returns(RedisResult.Create(luaResult));
+        return (new SseNotifier(muxer, logger), db);
+    }
+
+    // ── TrySubscribeAsync ──────────────────────────────────────────────────
 
     [Fact]
-    public void TrySubscribe_ReturnsTrueForFirstSubscriber()
+    public async Task TrySubscribeAsync_ReturnsTrue_WhenRedisReturnsPositiveCount()
     {
-        var notifier = new SseNotifier();
-        var tokenId = Guid.NewGuid();
-
-        notifier.TrySubscribe(tokenId).Should().BeTrue();
+        var (notifier, _) = CreateNotifier(luaResult: 1);
+        (await notifier.TrySubscribeAsync(Guid.NewGuid())).Should().BeTrue();
     }
 
     [Fact]
-    public void TrySubscribe_ReturnsTrueUpToMaxSubscribers()
+    public async Task TrySubscribeAsync_ReturnsFalse_WhenRedisReturnsZero()
     {
-        var notifier = new SseNotifier();
-        var tokenId = Guid.NewGuid();
-
-        for (var i = 0; i < 10; i++)
-            notifier.TrySubscribe(tokenId).Should().BeTrue($"subscriber {i + 1} of 10 should succeed");
+        var (notifier, _) = CreateNotifier(luaResult: 0);
+        (await notifier.TrySubscribeAsync(Guid.NewGuid())).Should().BeFalse();
     }
 
     [Fact]
-    public void TrySubscribe_ReturnsFalse_WhenAtMaxSubscribers()
+    public async Task TrySubscribeAsync_ReturnsTrue_FailOpen_WhenRedisThrows()
     {
-        var notifier = new SseNotifier();
-        var tokenId = Guid.NewGuid();
+        var db = Substitute.For<IDatabase>();
+        var muxer = Substitute.For<IConnectionMultiplexer>();
+        var logger = NullLogger<SseNotifier>.Instance;
+        muxer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
+        db.ScriptEvaluateAsync(
+                Arg.Any<string>(),
+                Arg.Any<RedisKey[]?>(),
+                Arg.Any<RedisValue[]?>(),
+                Arg.Any<CommandFlags>())
+            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.UnableToConnect, "Redis down"));
+        var notifier = new SseNotifier(muxer, logger);
 
-        for (var i = 0; i < 10; i++)
-            notifier.TrySubscribe(tokenId);
-
-        notifier.TrySubscribe(tokenId).Should().BeFalse();
+        (await notifier.TrySubscribeAsync(Guid.NewGuid())).Should().BeTrue();
     }
 
+    // ── UnsubscribeAsync ───────────────────────────────────────────────────
+
     [Fact]
-    public void TrySubscribe_AllowsNewSubscription_AfterUnsubscribe()
+    public async Task UnsubscribeAsync_DoesNotThrow_WhenRedisUnavailable()
     {
-        var notifier = new SseNotifier();
-        var tokenId = Guid.NewGuid();
+        var db = Substitute.For<IDatabase>();
+        var muxer = Substitute.For<IConnectionMultiplexer>();
+        var logger = NullLogger<SseNotifier>.Instance;
+        muxer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
+        db.StringDecrementAsync(Arg.Any<RedisKey>(), Arg.Any<long>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.UnableToConnect, "down"));
+        var notifier = new SseNotifier(muxer, logger);
 
-        for (var i = 0; i < 10; i++)
-            notifier.TrySubscribe(tokenId);
-
-        notifier.Unsubscribe(tokenId);
-
-        notifier.TrySubscribe(tokenId).Should().BeTrue();
+        var act = async () => await notifier.UnsubscribeAsync(Guid.NewGuid());
+        await act.Should().NotThrowAsync();
     }
 
-    [Fact]
-    public void Unsubscribe_DoesNotThrow_WhenNoPriorSubscription()
-    {
-        var notifier = new SseNotifier();
-
-        var act = () => notifier.Unsubscribe(Guid.NewGuid());
-
-        act.Should().NotThrow();
-    }
+    // ── RefreshSubscriptionAsync ───────────────────────────────────────────
 
     [Fact]
-    public void Unsubscribe_CleansUpEntry_WhenLastSubscriberLeaves()
+    public async Task RefreshSubscriptionAsync_DoesNotThrow_WhenRedisUnavailable()
     {
-        var notifier = new SseNotifier();
-        var tokenId = Guid.NewGuid();
+        var db = Substitute.For<IDatabase>();
+        var muxer = Substitute.For<IConnectionMultiplexer>();
+        var logger = NullLogger<SseNotifier>.Instance;
+        muxer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
+        db.KeyExpireAsync(Arg.Any<RedisKey>(), Arg.Any<TimeSpan?>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.UnableToConnect, "down"));
+        var notifier = new SseNotifier(muxer, logger);
 
-        notifier.TrySubscribe(tokenId);
-        notifier.Unsubscribe(tokenId);
-
-        // Count entry removed; a fresh TrySubscribe must succeed (count starts back at 0)
-        notifier.TrySubscribe(tokenId).Should().BeTrue();
+        var act = async () => await notifier.RefreshSubscriptionAsync(Guid.NewGuid());
+        await act.Should().NotThrowAsync();
     }
 
     // ── NotifyAsync ─────────────────────────────────────────────────────────
@@ -81,34 +98,28 @@ public sealed class SseNotifierTests
     [Fact]
     public async Task NotifyAsync_DoesNotThrow_WhenNoSubscribers()
     {
-        var notifier = new SseNotifier();
-
+        var (notifier, _) = CreateNotifier();
         var act = async () => await notifier.NotifyAsync(Guid.NewGuid(), "{}", CancellationToken.None);
-
         await act.Should().NotThrowAsync();
     }
 
     [Fact]
     public async Task NotifyAsync_DeliversSseEvent_ToSingleSubscriber()
     {
-        var notifier = new SseNotifier();
+        var (notifier, _) = CreateNotifier();
         var tokenId = Guid.NewGuid();
         using var cts = new CancellationTokenSource();
 
-        notifier.TrySubscribe(tokenId);
+        await notifier.TrySubscribeAsync(tokenId);
         var received = new List<SseEvent>();
 
         var consumer = Task.Run(async () =>
         {
-            try
-            {
-                await foreach (var evt in notifier.SubscribeAsync(tokenId, cts.Token))
-                    received.Add(evt);
-            }
+            try { await foreach (var evt in notifier.SubscribeAsync(tokenId, cts.Token)) received.Add(evt); }
             catch (OperationCanceledException) { }
         });
 
-        await Task.Delay(20); // ensure consumer is listening
+        await Task.Delay(20);
         await notifier.NotifyAsync(tokenId, @"{""id"":1}", CancellationToken.None);
         await Task.Delay(50);
         await cts.CancelAsync();
@@ -121,12 +132,12 @@ public sealed class SseNotifierTests
     [Fact]
     public async Task NotifyAsync_DeliversSseEvent_ToMultipleSubscribers()
     {
-        var notifier = new SseNotifier();
+        var (notifier, _) = CreateNotifier();
         var tokenId = Guid.NewGuid();
         using var cts = new CancellationTokenSource();
 
-        notifier.TrySubscribe(tokenId);
-        notifier.TrySubscribe(tokenId);
+        await notifier.TrySubscribeAsync(tokenId);
+        await notifier.TrySubscribeAsync(tokenId);
 
         var received1 = new List<SseEvent>();
         var received2 = new List<SseEvent>();
@@ -157,23 +168,20 @@ public sealed class SseNotifierTests
     [Fact]
     public void NotifyTokenDeleted_DoesNotThrow_WhenNoSubscribers()
     {
-        var notifier = new SseNotifier();
-
+        var (notifier, _) = CreateNotifier();
         var act = () => notifier.NotifyTokenDeleted(Guid.NewGuid());
-
         act.Should().NotThrow();
     }
 
     [Fact]
     public async Task NotifyTokenDeleted_CompletesChannel_SoConsumerExitsCleanly()
     {
-        var notifier = new SseNotifier();
+        var (notifier, _) = CreateNotifier();
         var tokenId = Guid.NewGuid();
 
-        notifier.TrySubscribe(tokenId);
+        await notifier.TrySubscribeAsync(tokenId);
         var received = new List<SseEvent>();
 
-        // No external cancellation — consumer must exit because the channel is completed
         var consumer = Task.Run(async () =>
         {
             await foreach (var evt in notifier.SubscribeAsync(tokenId, CancellationToken.None))
@@ -185,7 +193,6 @@ public sealed class SseNotifierTests
 
         var finished = await Task.WhenAny(consumer, Task.Delay(2000));
         finished.Should().Be(consumer, "consumer must exit after token-deleted completes the channel");
-
         received.Should().ContainSingle(e => e.EventName == "token-deleted");
     }
 
@@ -194,11 +201,11 @@ public sealed class SseNotifierTests
     [Fact]
     public async Task SubscribeAsync_RemovesChannelFromList_OnCancellation()
     {
-        var notifier = new SseNotifier();
+        var (notifier, _) = CreateNotifier();
         var tokenId = Guid.NewGuid();
         using var cts = new CancellationTokenSource();
 
-        notifier.TrySubscribe(tokenId);
+        await notifier.TrySubscribeAsync(tokenId);
 
         var consumer = Task.Run(async () =>
         {
@@ -210,7 +217,6 @@ public sealed class SseNotifierTests
         await cts.CancelAsync();
         await consumer;
 
-        // Channel was cleaned up — a subsequent NotifyAsync for the same token must not throw
         var act = async () => await notifier.NotifyAsync(tokenId, "{}", CancellationToken.None);
         await act.Should().NotThrowAsync();
     }

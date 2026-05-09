@@ -1,7 +1,7 @@
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using WebhookService.Application.Caching;
 using WebhookService.Application.Options;
 using WebhookService.Application.Tokens.Commands.UpdateToken;
 using WebhookService.Domain.Entities;
@@ -12,7 +12,7 @@ namespace WebhookService.UnitTests.Application.Tokens;
 public sealed class UpdateTokenCommandHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
-    private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
+    private readonly ITokenCache _tokenCache = Substitute.For<ITokenCache>();
     private readonly IOptions<WebhookOptions> _options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions
     {
         BaseUrl = "https://example.com",
@@ -20,7 +20,7 @@ public sealed class UpdateTokenCommandHandlerTests
         MaxRequestSizeMb = 5
     });
 
-    private UpdateTokenCommandHandler CreateHandler() => new(_repo, _options, _cache);
+    private UpdateTokenCommandHandler CreateHandler() => new(_repo, _options, _tokenCache);
 
     private static WebhookToken MakeToken(Guid id) => new()
     {
@@ -63,11 +63,10 @@ public sealed class UpdateTokenCommandHandlerTests
     {
         var id = Guid.NewGuid();
         var token = MakeToken(id);
-        _cache.Set($"token:{token.Token}", token);
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new UpdateTokenCommand(id, "new", true), CancellationToken.None);
 
-        _cache.TryGetValue($"token:{token.Token}", out _).Should().BeFalse();
+        await _tokenCache.Received(1).RemoveAsync(token.Token, Arg.Any<CancellationToken>());
     }
 }

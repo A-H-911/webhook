@@ -1,6 +1,6 @@
-﻿using FluentAssertions;
-using Microsoft.Extensions.Caching.Memory;
+using FluentAssertions;
 using NSubstitute;
+using WebhookService.Application.Caching;
 using WebhookService.Application.Tokens.Commands.ResetCustomResponse;
 using WebhookService.Domain.Entities;
 using WebhookService.Domain.Repositories;
@@ -11,9 +11,9 @@ namespace WebhookService.UnitTests.Application.Tokens;
 public sealed class ResetCustomResponseCommandHandlerTests
 {
     private readonly IWebhookTokenRepository _repo = Substitute.For<IWebhookTokenRepository>();
-    private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
+    private readonly ITokenCache _tokenCache = Substitute.For<ITokenCache>();
 
-    private ResetCustomResponseCommandHandler CreateHandler() => new(_repo, _cache);
+    private ResetCustomResponseCommandHandler CreateHandler() => new(_repo, _tokenCache);
 
     [Fact]
     public async Task Handle_ReturnsFalse_WhenTokenNotFound()
@@ -51,11 +51,10 @@ public sealed class ResetCustomResponseCommandHandlerTests
     {
         var id = Guid.NewGuid();
         var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
-        _cache.Set($"token:{token.Token}", token);
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new ResetCustomResponseCommand(id), CancellationToken.None);
 
-        _cache.TryGetValue($"token:{token.Token}", out _).Should().BeFalse();
+        await _tokenCache.Received(1).RemoveAsync(token.Token, Arg.Any<CancellationToken>());
     }
 }

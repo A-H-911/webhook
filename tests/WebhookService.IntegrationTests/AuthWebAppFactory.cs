@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Threading.RateLimiting;
 using Testcontainers.MsSql;
+using Testcontainers.Redis;
 using WebhookService.Domain.Services;
 using WebhookService.Infrastructure.Persistence;
 
@@ -23,6 +24,8 @@ public sealed class AuthWebAppFactory : WebApplicationFactory<Program>, IAsyncLi
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
         .Build();
 
+    private readonly RedisContainer _redis = new RedisBuilder().Build();
+
     public const string TestUsername = "admin";
     public const string TestPassword = "test-P@ssw0rd-123";
 
@@ -30,7 +33,8 @@ public sealed class AuthWebAppFactory : WebApplicationFactory<Program>, IAsyncLi
     public static readonly string TestPasswordHash =
         BCrypt.Net.BCrypt.HashPassword(TestPassword, workFactor: 4);
 
-    public async Task InitializeAsync() => await _db.StartAsync();
+    public async Task InitializeAsync() =>
+        await Task.WhenAll(_db.StartAsync(), _redis.StartAsync());
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -39,6 +43,7 @@ public sealed class AuthWebAppFactory : WebApplicationFactory<Program>, IAsyncLi
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:WebhookDb"] = _db.GetConnectionString(),
+                ["ConnectionStrings:Redis"] = _redis.GetConnectionString(),
                 ["Webhook:BaseUrl"] = "https://test.example.com",
                 ["Webhook:RetentionDays"] = "7",
                 ["Webhook:MaxRequestSizeMb"] = "5",
@@ -62,6 +67,9 @@ public sealed class AuthWebAppFactory : WebApplicationFactory<Program>, IAsyncLi
             if (sseDescriptor is not null) services.Remove(sseDescriptor);
 
             services.AddSingleton<ISseNotifier, TestNullSseNotifier>();
+
+            services.RemoveAll<IRequestQueuePublisher>();
+            services.AddSingleton<IRequestQueuePublisher, FakeRequestQueuePublisher>();
 
             // Override rate limiter: integration tests share 127.0.0.1 and would exhaust
             // the 5/min fixed window immediately. PostConfigure replaces the "login" policy
@@ -90,6 +98,7 @@ public sealed class AuthWebAppFactory : WebApplicationFactory<Program>, IAsyncLi
         });
     }
 
-    async Task IAsyncLifetime.DisposeAsync() => await _db.DisposeAsync();
+    async Task IAsyncLifetime.DisposeAsync() =>
+        await Task.WhenAll(_db.DisposeAsync().AsTask(), _redis.DisposeAsync().AsTask());
 
 }
