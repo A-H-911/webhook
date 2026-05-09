@@ -13,6 +13,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.7" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Polly" Version="8.6.6" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -24,6 +26,9 @@
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>WebhookService.UnitTests</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>WebhookService.StreamWorker</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 

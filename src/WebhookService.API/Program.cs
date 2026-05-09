@@ -1,3 +1,4 @@
+using StackExchange.Redis;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Antiforgery;
@@ -42,8 +43,8 @@ builder.Services
     .AddSingleton<IValidateOptions<AuthOptions>, AuthOptionsValidator>()
     .AddOptionsWithValidateOnStart<AuthOptions>();
 
-// Session revocation — in-memory store; single admin, so no distributed store needed
-builder.Services.AddSingleton<SessionRevocationStore>();
+// Session revocation — Redis store for cross-instance propagation
+builder.Services.AddSingleton<ISessionRevocationStore, RedisSessionRevocationStore>();
 
 // Cookie authentication — cookies are the only browser-native mechanism that works with SSE
 builder.Services
@@ -71,16 +72,16 @@ builder.Services
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             return Task.CompletedTask;
         };
-        cookie.Events.OnValidatePrincipal = ctx =>
+        cookie.Events.OnValidatePrincipal = async ctx =>
         {
             var sid = ctx.Principal?.FindFirstValue("sid");
-            var store = ctx.HttpContext.RequestServices.GetRequiredService<SessionRevocationStore>();
-            if (sid is not null && store.IsRevoked(sid))
+            if (sid is null) return;
+            var store = ctx.HttpContext.RequestServices.GetRequiredService<ISessionRevocationStore>();
+            if (await store.IsRevokedAsync(sid))
             {
                 ctx.RejectPrincipal();
                 ctx.ShouldRenew = false;
             }
-            return Task.CompletedTask;
         };
     });
 
@@ -132,7 +133,9 @@ builder.Services.AddAntiforgery(o =>
 
 // Application + Infrastructure layers
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddCoreInfrastructure(builder.Configuration);
+builder.Services.AddApiInfrastructure();
+builder.Services.AddJobsWorkerInfrastructure();
 
 // CORS — entire block skipped if AllowedOrigins is empty/whitespace
 var rawOrigins = builder.Configuration["Cors:AllowedOrigins"] ?? string.Empty;
@@ -154,6 +157,10 @@ builder.Services.AddHealthChecks()
     .AddSqlServer(
         sp => sp.GetRequiredService<IConfiguration>().GetConnectionString("WebhookDb")!,
         name: "sqlserver",
+        tags: ["ready"])
+    .AddRedis(
+        sp => sp.GetRequiredService<IConnectionMultiplexer>(),
+        name: "redis",
         tags: ["ready"]);
 
 var app = builder.Build();
