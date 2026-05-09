@@ -1,41 +1,75 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 using WebhookService.Domain.Services;
 
 namespace WebhookService.Infrastructure.Sse;
 
-internal sealed class SseNotifier : ISseNotifier
+internal sealed class SseNotifier(
+    IConnectionMultiplexer redis,
+    ILogger<SseNotifier> logger) : ISseNotifier
 {
     private const int MaxSubscribersPerToken = 10;
+    private const int SubscriberTtlSeconds = 7200; // self-heals if instance crashes
+    private const string CounterKeyPrefix = "wh:sse-count:";
+
+    // Atomic INCR + limit check + EXPIRE; returns 0 on limit reached, new count on success.
+    private const string TrySubscribeLua = """
+        local count = redis.call('INCR', KEYS[1])
+        if count > tonumber(ARGV[1]) then
+            redis.call('DECR', KEYS[1])
+            return 0
+        end
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+        return count
+        """;
 
     private readonly ConcurrentDictionary<Guid, List<Channel<SseEvent>>> _subscribers = new();
-    private readonly ConcurrentDictionary<Guid, int> _subscriberCounts = new();
     private readonly Lock _lock = new();
 
-    public bool TrySubscribe(Guid tokenId)
+    public async Task<bool> TrySubscribeAsync(Guid tokenId, CancellationToken ct = default)
     {
-        lock (_lock)
+        try
         {
-            var current = _subscriberCounts.GetOrAdd(tokenId, 0);
-            if (current >= MaxSubscribersPerToken)
-                return false;
-            _subscriberCounts[tokenId] = current + 1;
+            var db = redis.GetDatabase();
+            var result = (long)await db.ScriptEvaluateAsync(
+                TrySubscribeLua,
+                new RedisKey[] { $"{CounterKeyPrefix}{tokenId}" },
+                new RedisValue[] { MaxSubscribersPerToken, SubscriberTtlSeconds });
+            return result > 0;
+        }
+        catch (Exception ex) when (ex is RedisException or RedisTimeoutException)
+        {
+            logger.LogWarning(ex, "Redis SSE counter unavailable for token {TokenId}; using fail-open", tokenId);
             return true;
         }
     }
 
-    public void Unsubscribe(Guid tokenId)
+    public async Task UnsubscribeAsync(Guid tokenId, CancellationToken ct = default)
     {
-        lock (_lock)
+        try
         {
-            if (_subscriberCounts.TryGetValue(tokenId, out var count))
-            {
-                if (count <= 1)
-                    _subscriberCounts.TryRemove(tokenId, out _);
-                else
-                    _subscriberCounts[tokenId] = count - 1;
-            }
+            var db = redis.GetDatabase();
+            await db.StringDecrementAsync($"{CounterKeyPrefix}{tokenId}");
+        }
+        catch (Exception ex) when (ex is RedisException or RedisTimeoutException)
+        {
+            logger.LogWarning(ex, "Redis SSE counter DECR failed for token {TokenId}", tokenId);
+        }
+    }
+
+    public async Task RefreshSubscriptionAsync(Guid tokenId, CancellationToken ct = default)
+    {
+        try
+        {
+            var db = redis.GetDatabase();
+            await db.KeyExpireAsync($"{CounterKeyPrefix}{tokenId}", TimeSpan.FromSeconds(SubscriberTtlSeconds));
+        }
+        catch (Exception ex) when (ex is RedisException or RedisTimeoutException)
+        {
+            logger.LogWarning(ex, "Redis SSE counter EXPIRE failed for token {TokenId}", tokenId);
         }
     }
 
@@ -75,7 +109,7 @@ internal sealed class SseNotifier : ISseNotifier
         }
     }
 
-    public async Task NotifyAsync(Guid tokenId, string summaryJson, CancellationToken ct = default)
+    public Task NotifyAsync(Guid tokenId, string summaryJson, CancellationToken ct = default)
     {
         var evt = new SseEvent("request", summaryJson);
         List<Channel<SseEvent>> snapshot;
@@ -83,12 +117,16 @@ internal sealed class SseNotifier : ISseNotifier
         lock (_lock)
         {
             if (!_subscribers.TryGetValue(tokenId, out var list))
-                return;
+                return Task.CompletedTask;
             snapshot = [.. list];
         }
 
+        // DropOldest mode means TryWrite never blocks; avoids ChannelClosedException
+        // race if NotifyTokenDeleted completes the channel between snapshot and write.
         foreach (var channel in snapshot)
-            await channel.Writer.WriteAsync(evt, ct);
+            channel.Writer.TryWrite(evt);
+
+        return Task.CompletedTask;
     }
 
     public void NotifyTokenDeleted(Guid tokenId)

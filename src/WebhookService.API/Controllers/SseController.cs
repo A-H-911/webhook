@@ -18,7 +18,7 @@ public sealed class SseController(ISseNotifier sseNotifier, IWebhookTokenReposit
             return;
         }
 
-        if (!sseNotifier.TrySubscribe(tokenId))
+        if (!await sseNotifier.TrySubscribeAsync(tokenId, ct))
         {
             Response.StatusCode = StatusCodes.Status429TooManyRequests;
             return;
@@ -34,6 +34,9 @@ public sealed class SseController(ISseNotifier sseNotifier, IWebhookTokenReposit
             await Response.Body.WriteAsync(retryFrame, ct);
             await Response.Body.FlushAsync(ct);
 
+            // Periodically refresh the global Redis SSE counter TTL (prevents self-expiry on long connections)
+            _ = RefreshPeriodicallyAsync(tokenId, ct);
+
             await foreach (var evt in sseNotifier.SubscribeAsync(tokenId, ct))
             {
                 var line = $"event: {evt.EventName}\ndata: {evt.Data}\n\n";
@@ -44,7 +47,18 @@ public sealed class SseController(ISseNotifier sseNotifier, IWebhookTokenReposit
         }
         finally
         {
-            sseNotifier.Unsubscribe(tokenId);
+            await sseNotifier.UnsubscribeAsync(tokenId, CancellationToken.None);
         }
+    }
+
+    private async Task RefreshPeriodicallyAsync(Guid tokenId, CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+                await sseNotifier.RefreshSubscriptionAsync(tokenId, ct);
+        }
+        catch (OperationCanceledException) { }
     }
 }

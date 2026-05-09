@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Caching.Memory;
+using WebhookService.Application.Caching;
 using WebhookService.Domain.Entities;
 using WebhookService.Domain.Repositories;
 using WebhookService.Domain.Services;
@@ -14,14 +14,10 @@ namespace WebhookService.API.Controllers;
 [AllowAnonymous]
 public sealed class WebhookController(
     IWebhookTokenRepository tokenRepository,
-    IWebhookRequestRepository requestRepository,
-    ISseNotifier sseNotifier,
-    IMemoryCache cache,
+    IRequestQueuePublisher queuePublisher,
+    ITokenCache tokenCache,
     ILogger<WebhookController> logger) : ControllerBase
 {
-    private static readonly MemoryCacheEntryOptions TokenCacheOptions =
-        new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(5));
-
     [Route("webhook/{token:guid}")]
     [HttpGet, HttpPost, HttpPut, HttpPatch, HttpDelete, HttpHead, HttpOptions]
     [EnableRateLimiting("webhook-receiver")]
@@ -52,31 +48,13 @@ public sealed class WebhookController(
             SizeBytes = Request.ContentLength ?? bodyBytes ?? 0
         };
 
-        await requestRepository.AddAsync(request, ct);
+        // Publish to Redis Stream — Worker persists to DB and fires SSE asynchronously.
+        // On Redis failure after retries, RedisStreamPublisher throws; middleware returns 503.
+        await queuePublisher.PublishAsync(request, ct);
 
-        // Inactive tokens: persisted for audit, but return 410 Gone to signal senders to stop.
+        // Inactive tokens: queued for audit, but return 410 Gone to signal senders to stop.
         if (!webhookToken.IsActive)
             return StatusCode(StatusCodes.Status410Gone, new { message = "This webhook URL has been deactivated." });
-
-        try
-        {
-            var summary = JsonSerializer.Serialize(new
-            {
-                id = request.Id,
-                method = request.Method,
-                path = request.Path,
-                receivedAt = request.ReceivedAt,
-                sizeBytes = request.SizeBytes,
-                ipAddress = request.IpAddress,
-                contentType = request.ContentType,
-                statusCode = 200
-            });
-            await sseNotifier.NotifyAsync(webhookToken.Id, summary);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "SSE notify failed for token {TokenId}", webhookToken.Id);
-        }
 
         var custom = webhookToken.CustomResponse;
         if (custom is not null)
@@ -103,13 +81,13 @@ public sealed class WebhookController(
 
     private async Task<WebhookToken?> ResolveTokenAsync(Guid token, CancellationToken ct)
     {
-        var cacheKey = $"token:{token}";
-        if (cache.TryGetValue(cacheKey, out WebhookToken? cached))
+        var cached = await tokenCache.GetAsync(token, ct);
+        if (cached is not null)
             return cached;
 
         var found = await tokenRepository.GetByTokenIncludingInactiveAsync(token, ct);
         if (found is not null)
-            cache.Set(cacheKey, found, TokenCacheOptions);
+            await tokenCache.SetAsync(token, found, ct);
 
         return found;
     }

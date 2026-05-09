@@ -1,12 +1,12 @@
 using MediatR;
-using Microsoft.Extensions.Caching.Memory;
+using WebhookService.Application.Caching;
 using WebhookService.Domain.Repositories;
 
 namespace WebhookService.Application.Tokens.Commands.ResetCustomResponse;
 
 internal sealed class ResetCustomResponseCommandHandler(
     IWebhookTokenRepository repository,
-    IMemoryCache cache)
+    ITokenCache tokenCache)
     : IRequestHandler<ResetCustomResponseCommand, bool>
 {
     public async Task<bool> Handle(ResetCustomResponseCommand request, CancellationToken cancellationToken)
@@ -17,7 +17,7 @@ internal sealed class ResetCustomResponseCommandHandler(
         token.CustomResponse = null;
         await repository.UpdateAsync(token, cancellationToken);
 
-        cache.Remove($"token:{token.Token}");
+        await tokenCache.RemoveAsync(token.Token, cancellationToken);
         return true;
     }
 }

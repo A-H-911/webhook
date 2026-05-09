@@ -14,7 +14,7 @@ namespace WebhookService.API.Controllers;
 [Route("api/auth")]
 public sealed class AuthController(
     IOptions<AuthOptions> authOptions,
-    SessionRevocationStore revocationStore,
+    ISessionRevocationStore revocationStore,
     ILogger<AuthController> logger) : ControllerBase
 {
     [HttpPost("login")]
@@ -57,7 +57,7 @@ public sealed class AuthController(
     {
         var sid = User.FindFirstValue("sid");
         if (sid is not null)
-            revocationStore.Revoke(sid);
+            await revocationStore.RevokeAsync(sid);
 
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Ok();

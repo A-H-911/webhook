@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FluentValidation;
+using StackExchange.Redis;
 
 namespace WebhookService.API.Middleware;
 
@@ -30,6 +31,13 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
         {
             logger.LogWarning(ex, "Bad HTTP request for {Method} {Path}", context.Request.Method, context.Request.Path);
             await WriteErrorAsync(context, ex.StatusCode, ex.Message);
+        }
+        catch (Exception ex) when (ex is RedisException or RedisTimeoutException)
+        {
+            logger.LogError(ex, "Redis unavailable for {Method} {Path}", context.Request.Method, context.Request.Path);
+            context.Response.Headers.RetryAfter = "5";
+            await WriteErrorAsync(context, StatusCodes.Status503ServiceUnavailable,
+                "Service temporarily unavailable. Please retry shortly.");
         }
         catch (Exception ex)
         {
