@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Polly;
 using Serilog;
-using WebhookService.Application;
 using WebhookService.Application.Options;
 using WebhookService.Infrastructure;
 using WebhookService.Infrastructure.Persistence;
@@ -12,7 +11,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService(o => o.ServiceName = "WebhookService.JobsWorker");
 builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration));
 
-builder.Services.AddApplication();
 builder.Services.AddCoreInfrastructure(builder.Configuration);
 builder.Services.AddJobsWorkerInfrastructure();
 
