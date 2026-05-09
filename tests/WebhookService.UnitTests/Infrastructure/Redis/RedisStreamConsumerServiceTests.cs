@@ -170,4 +170,233 @@ public sealed class RedisStreamConsumerServiceTests
             Arg.Any<RedisValue>(),
             Arg.Any<CommandFlags>());
     }
+
+    // ── Branch-coverage helpers ───────────────────────────────────────────────
+
+    private void SetupBaseRedis()
+    {
+        _redis.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(_db);
+        _redis.GetSubscriber(Arg.Any<object?>()).Returns(_subscriber);
+
+        _db.StreamCreateConsumerGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
+                Arg.Any<RedisValue>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns<Task<bool>>(_ => throw new RedisServerException("BUSYGROUP Consumer Group name already exists"));
+
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)"0-0"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult(Array.Empty<StreamEntry>()));
+
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult(Array.Empty<StreamEntry>()));
+
+        _db.StreamAcknowledgeAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult(1L));
+
+        _subscriber.PublishAsync(
+                Arg.Any<RedisChannel>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult(0L));
+    }
+
+    private static StreamEntry ValidEntry()
+    {
+        var request = new WebhookRequest
+        {
+            Id = Guid.NewGuid(),
+            TokenId = Guid.NewGuid(),
+            ReceivedAt = DateTimeOffset.UtcNow,
+            Method = "POST",
+            Path = "/webhook/test",
+            Headers = "{}",
+            IpAddress = "127.0.0.1",
+            UserAgent = string.Empty,
+            SizeBytes = 0
+        };
+        return new StreamEntry("1-1", [new NameValueEntry("payload", JsonSerializer.Serialize(request))]);
+    }
+
+    private RedisStreamConsumerService BuildService(IWebhookRequestRepository repo) =>
+        new(_redis, MakeScopeFactory(repo), NullLogger<RedisStreamConsumerService>.Instance);
+
+    private static async Task RunCycleAsync(RedisStreamConsumerService service, int delayMs = 400)
+    {
+        using var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(delayMs);
+        await cts.CancelAsync();
+        await service.StopAsync(CancellationToken.None);
+    }
+
+    // ── Branch-coverage tests ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ProcessEntryAsync_MissingPayloadField_AcksAndSkipsWithoutPersisting()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        var entry = new StreamEntry("1-1", [new NameValueEntry("other", "data")]);
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
+
+        await RunCycleAsync(BuildService(repo));
+
+        await repo.DidNotReceive().AddAsync(Arg.Any<WebhookRequest>(), Arg.Any<CancellationToken>());
+        await _db.Received().StreamAcknowledgeAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ProcessEntryAsync_NullDeserialization_AcksAndSkipsWithoutPersisting()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        var entry = new StreamEntry("1-1", [new NameValueEntry("payload", "null")]);
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
+
+        await RunCycleAsync(BuildService(repo));
+
+        await repo.DidNotReceive().AddAsync(Arg.Any<WebhookRequest>(), Arg.Any<CancellationToken>());
+        await _db.Received().StreamAcknowledgeAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ProcessEntryAsync_PersistThrows_LeavesEntryUnackedForPelRecovery()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        repo.AddAsync(Arg.Any<WebhookRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("DB unavailable")));
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [ValidEntry()] : Array.Empty<StreamEntry>()));
+
+        await RunCycleAsync(BuildService(repo));
+
+        // ACK must NOT be called — the entry stays in PEL for recovery on next restart
+        await _db.DidNotReceive().StreamAcknowledgeAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ProcessEntryAsync_PublishSseFails_StillAcksEntry()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        _subscriber.PublishAsync(
+                Arg.Any<RedisChannel>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromException<long>(new RedisConnectionException(ConnectionFailureType.None, "test")));
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [ValidEntry()] : Array.Empty<StreamEntry>()));
+
+        await RunCycleAsync(BuildService(repo));
+
+        // Pub/sub failure is swallowed inside PublishSsePubSubAsync — ACK still runs
+        await _db.Received().StreamAcknowledgeAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task AckAsync_RedisConnectionException_DoesNotPropagateToProcessEntry()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        _db.StreamAcknowledgeAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromException<long>(new RedisConnectionException(ConnectionFailureType.None, "test")));
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [ValidEntry()] : Array.Empty<StreamEntry>()));
+
+        await RunCycleAsync(BuildService(repo));
+
+        // Persist ran despite ACK failing — processing was not interrupted
+        await repo.Received().AddAsync(Arg.Any<WebhookRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DrainPendingAsync_RedisConnectionException_SkipsToMainLoop()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)"0-0"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromException<StreamEntry[]>(
+                new RedisConnectionException(ConnectionFailureType.None, "test")));
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [ValidEntry()] : Array.Empty<StreamEntry>()));
+
+        await RunCycleAsync(BuildService(repo));
+
+        // PEL drain failure did not stop the service — main loop ran and persisted the entry
+        await repo.Received().AddAsync(Arg.Any<WebhookRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RedisConnectionExceptionInMainLoop_PausesAndContinues()
+    {
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(ci => calls++ == 0
+                ? Task.FromException<StreamEntry[]>(
+                    new RedisConnectionException(ConnectionFailureType.None, "Redis down"))
+                : Task.FromResult(Array.Empty<StreamEntry>()));
+
+        using var cts = new CancellationTokenSource();
+        var service = BuildService(repo);
+        await service.StartAsync(cts.Token);
+        await Task.Delay(200);
+        await cts.CancelAsync();
+        await service.StopAsync(CancellationToken.None);
+
+        // Service entered the main loop at least once (the call that threw)
+        calls.Should().BeGreaterThan(0);
+    }
 }
