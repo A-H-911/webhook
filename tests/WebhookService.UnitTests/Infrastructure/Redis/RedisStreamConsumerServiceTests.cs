@@ -101,7 +101,10 @@ public sealed class RedisStreamConsumerServiceTests
     [Fact]
     public async Task ProcessEntryAsync_PublishesToRedisPubSub_WhenEntryIsValid()
     {
-        // Arrange — mock Redis to return one stream entry then empty
+        // Arrange — wire up class-level mocks that CreateService() would normally set up
+        _redis.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(_db);
+        _redis.GetSubscriber(Arg.Any<object?>()).Returns(_subscriber);
+
         var tokenId = Guid.NewGuid();
         var request = new WebhookRequest
         {
@@ -124,11 +127,18 @@ public sealed class RedisStreamConsumerServiceTests
                 Arg.Any<RedisValue>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
             .Returns<Task<bool>>(_ => throw new RedisServerException("BUSYGROUP Consumer Group name already exists"));
 
-        var readCall = 0;
+        // PEL drain ("0-0") returns empty; main loop (">") returns the entry once, then empty
+        var mainReadCall = 0;
         _db.StreamReadGroupAsync(
                 Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
-                Arg.Any<RedisValue>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
-            .Returns(_ => Task.FromResult(readCall++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
+                Arg.Is<RedisValue>(v => v == (RedisValue)"0-0"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(Task.FromResult(Array.Empty<StreamEntry>()));
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(mainReadCall++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
 
         _db.StreamAcknowledgeAsync(
                 Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue[]>(), Arg.Any<CommandFlags>())
@@ -142,7 +152,6 @@ public sealed class RedisStreamConsumerServiceTests
         repo.AddAsync(Arg.Any<WebhookRequest>(), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
-        // GREEN: 3-param ctor — no ISseNotifier
         var service = new RedisStreamConsumerService(
             _redis,
             MakeScopeFactory(repo),
