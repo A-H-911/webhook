@@ -30,7 +30,12 @@ frontend/webhook-spa/.angular/
 
 # Test output
 coverage-results*/
+coverage/
+**/TestResults/
 e2e-screenshots/
+
+# Local scratch files
+ecc-cont-learn.txt
 
 # OS
 .DS_Store
