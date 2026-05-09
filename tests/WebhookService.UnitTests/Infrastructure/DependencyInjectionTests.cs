@@ -135,35 +135,4 @@ public sealed class DependencyInjectionTests
             "AddInfrastructure shim must be removed; callers must use focused extensions");
     }
 
-    // ── Obsolete shim back-compat ─────────────────────────────────────────────
-
-    [Fact]
-    public void ObsoleteAddInfrastructure_RegistersUnionOfAllFour()
-    {
-        var services = new ServiceCollection();
-#pragma warning disable CS0618 // Intentional: testing the obsolete back-compat shim
-        services.AddInfrastructure(MakeConfig());
-#pragma warning restore CS0618
-
-        // Core
-        services.Should().Contain(d => d.ServiceType == typeof(IWebhookTokenRepository));
-        services.Should().Contain(d => d.ServiceType == typeof(IConnectionMultiplexer));
-
-        // API
-        services.Should().Contain(d => d.ServiceType == typeof(IRequestQueuePublisher));
-        services.Should().Contain(d => d.ServiceType == typeof(ISseNotifier));
-        services.Should().Contain(d =>
-            d.ServiceType == typeof(IHostedService) &&
-            d.ImplementationType == typeof(RedisSseBridgeService));
-
-        // StreamWorker
-        services.Should().Contain(d =>
-            d.ServiceType == typeof(IHostedService) &&
-            d.ImplementationType == typeof(RedisStreamConsumerService));
-
-        // JobsWorker
-        services.Should().Contain(d =>
-            d.ServiceType == typeof(IHostedService) &&
-            d.ImplementationType == typeof(RetentionCleanupService));
-    }
 }

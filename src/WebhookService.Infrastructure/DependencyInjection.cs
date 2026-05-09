@@ -76,18 +76,4 @@ public static class DependencyInjection
         services.AddHostedService<RetentionCleanupService>();
         return services;
     }
-
-    /// <summary>
-    /// Back-compat shim for <see cref="WebApplicationFactory{TEntryPoint}"/> in integration tests.
-    /// Remove in the Phase 4 follow-up once test factories are updated to call focused extensions.
-    /// </summary>
-    [Obsolete("Use AddCoreInfrastructure + AddApiInfrastructure + AddStreamWorkerInfrastructure + AddJobsWorkerInfrastructure")]
-    public static IServiceCollection AddInfrastructure(
-        this IServiceCollection services,
-        IConfiguration configuration)
-        => services
-            .AddCoreInfrastructure(configuration)
-            .AddApiInfrastructure()
-            .AddStreamWorkerInfrastructure()
-            .AddJobsWorkerInfrastructure();
 }
