@@ -1,6 +1,6 @@
 # Webhook Service — Codemaps Index
 
-**Last Updated:** 2026-05-08 (webhook URL base URL fix: IOptions consistency in query handlers, appsettings defaults, docker-compose.override.yml hardcode bug)
+**Last Updated:** 2026-05-10 (three-process architecture: api + stream-worker + jobs-worker; Redis stream/pub-sub; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces; DI split)
 
 ---
 
@@ -47,6 +47,30 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 
 ---
 
+## Recent Changes (as of 2026-05-10)
+
+### Architecture
+- **Three-process split:** `stream-worker` (Redis stream consumer) and `jobs-worker` (retention cleanup) extracted from API into separate deployable units
+- **Redis added:** `redis:7-alpine` for stream (`webhook-requests`), pub/sub (`sse:{tokenId}`), and token cache backing
+- **DI extensions split:** `AddCoreInfrastructure` + `AddApiInfrastructure` + `AddStreamWorkerInfrastructure` + `AddJobsWorkerInfrastructure`
+
+### New Interfaces
+- **`IRequestQueuePublisher`** (Domain) → `RedisStreamPublisher` — decouples `WebhookController` from Redis XADD
+- **`ITokenCache`** (Application/Caching) → `RedisTokenCache` — wraps `IMemoryCache` with typed contract
+- **`ISessionRevocationStore`** (API/Services) → `RedisSessionRevocationStore` — session revocation on logout
+
+### Infrastructure
+- **`RedisStreamConsumerService`** — decoupled from `ISseNotifier`; now publishes only via Redis pub/sub
+- **`RedisSseBridgeService`** — stays in API; subscribes to `sse:*` and writes to in-process `SseNotifier`
+- **Consumer name** — stable via `WEBHOOK_WORKER_ID` env var (prevents PEL orphaning on restart)
+- **Dockerfile** — parameterized with `ARG PROJECT_NAME`; `curl` installed for health checks
+- **`docker-compose.yml`** — `stream-worker` + `jobs-worker` services added; health checks use `curl`
+
+### Tests
+- **373 tests total:** 286 unit + 47 integration + 40 E2E (all green)
+- **7 new branch-coverage tests** for `RedisStreamConsumerService` error containment zones
+- **New E2E tests:** `StreamWorkerE2ETests`, `JobsWorkerRetentionTests`, `ComprehensiveE2ETests`
+
 ## Recent Changes (as of 2026-05-08)
 
 ### Backend Updates
@@ -89,11 +113,14 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 
 | Layer | File | Purpose |
 |-------|------|---------|
-| **API** | `src/WebhookService.API/Program.cs` | DI, middleware, endpoint mapping |
+| **API** | `src/WebhookService.API/Program.cs` | DI (Core+Api), middleware, endpoint mapping |
+| **StreamWorker** | `src/WebhookService.StreamWorker/Program.cs` | DI (Core+Stream), Polly DB wait, health endpoints |
+| **JobsWorker** | `src/WebhookService.JobsWorker/Program.cs` | DI (Core+Jobs), Polly DB wait, health endpoints |
 | **Controllers** | `src/WebhookService.API/Controllers/WebhookController.cs` | `POST /webhook/{token:guid}` receiver |
 | **Middleware** | `src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs` | Exception → HTTP status, SSE guards |
 | **Domain** | `src/WebhookService.Domain/Entities/WebhookToken.cs` | Token aggregate root |
 | **Application** | `src/WebhookService.Application/Tokens/Commands/` | CQRS command handlers |
+| **Infrastructure** | `src/WebhookService.Infrastructure/DependencyInjection.cs` | Four DI extensions; Redis + EF registrations |
 | **Infrastructure** | `src/WebhookService.Infrastructure/Sse/SseNotifier.cs` | Channel-based SSE broadcast |
 | **Frontend** | `frontend/webhook-spa/src/app/app.ts` | Root Angular component, auth, logout |
 | **Services** | `frontend/webhook-spa/src/app/core/services/sse.service.ts` | EventSource SSE client |

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-08 | Updated: WEBHOOK_BASE_URL config notes; docker-compose.override.yml fix -->
+<!-- Generated: 2026-05-10 | Updated: Redis service + stream-worker + jobs-worker; StackExchange.Redis; AspNetCore.HealthChecks.Redis; WindowsServices; WEBHOOK_WORKER_ID; curl in runtime image -->
 
 # Dependencies
 
@@ -13,24 +13,32 @@
 - `MediatR` — CQRS command/query bus + pipeline behaviors
 - `FluentValidation.AspNetCore` — request validation (auto-discovered in Application assembly)
 
+### Redis (Added as part of three-process split)
+- `StackExchange.Redis` — `IConnectionMultiplexer`; stream publisher, token cache, SSE bridge, stream consumer
+
 ### Auth
 - `Microsoft.AspNetCore.Authentication.Cookies` — cookie-based session auth
 - `BCrypt.Net-Next` — password hash verification at login
 
-### Resilience & Security (Updated 2026-05-07)
-- `Polly` — retry on startup DB migration (5 attempts, exponential backoff)
-- `Microsoft.AspNetCore.RateLimiting` — fixed-window rate limiter (login 5/min, webhook-receiver configurable)
-- `Microsoft.AspNetCore.Antiforgery` — CSRF protection, X-XSRF-TOKEN header validation
+### Resilience & Security
+- `Polly` — retry: startup DB readiness (workers, 30x exponential) + API migration (5x)
+- `Microsoft.AspNetCore.RateLimiting` — fixed-window (login 5/min, webhook-receiver configurable)
+- `Microsoft.AspNetCore.Antiforgery` — CSRF protection, X-XSRF-TOKEN validation
+
+### Health Checks
+- `AspNetCore.HealthChecks.SqlServer` — SQL ping for /health/ready (all three units)
+- `AspNetCore.HealthChecks.Redis` — Redis ping for /health/ready (StreamWorker only)
+- `Microsoft.Extensions.Hosting.WindowsServices` — Windows Service SCM support (workers)
 
 ### Observability
 - `Serilog.AspNetCore` — structured logging
 - `Serilog.Sinks.Seq` — log shipping to SEQ
-- `Microsoft.AspNetCore.Diagnostics.HealthChecks` — /health/live and /health/ready
-- `AspNetCore.HealthChecks.SqlServer` — SQL Server ping for /health/ready
+- `Microsoft.AspNetCore.Diagnostics.HealthChecks` — /health/live + /health/ready
 
 ### Testing
 - `xUnit` — test framework (unit + integration + E2E)
-- `Testcontainers.MsSql` — real SQL Server 2022 container in integration tests
+- `NSubstitute` — mocking (unit tests)
+- `Testcontainers.MsSql` — real SQL Server 2022 in integration tests
 - `Microsoft.AspNetCore.Mvc.Testing` — `WebApplicationFactory<Program>`
 - `Microsoft.Playwright` — headless Chromium E2E tests
 
@@ -54,42 +62,47 @@
 
 ## Infrastructure Services
 
-| Service     | Image                      | Host Port             | Purpose                          |
-|-------------|----------------------------|-----------------------|----------------------------------|
-| `sqlserver` | Custom (SQL Server 2022)   | 1433                  | Primary data store               |
-| `seq`       | `datalust/seq:latest`      | 5341 (ingest), 5342 (UI) | Structured log aggregation    |
-| `frontend`  | Custom nginx               | 8088                  | Static SPA + reverse proxy       |
-| `api`       | Custom .NET                | 8080                  | Backend API                      |
+| Service | Image | Host Port | Purpose |
+|---------|-------|-----------|---------|
+| `api` | Custom .NET (`PROJECT_NAME=WebhookService.API`) | 8080 | Backend API + SSE fan-out |
+| `stream-worker` | Custom .NET (`PROJECT_NAME=WebhookService.StreamWorker`) | none | Redis stream consumer → SQL persist |
+| `jobs-worker` | Custom .NET (`PROJECT_NAME=WebhookService.JobsWorker`) | none | Retention cleanup (single replica) |
+| `sqlserver` | Custom (SQL Server 2022) | 1433 | Primary data store |
+| `redis` | `redis:7-alpine` | 6379 (localhost only) | Stream + pub/sub + token cache |
+| `seq` | `datalust/seq:latest` | 5341 (ingest), 5342 (UI) | Structured log aggregation |
+| `frontend` | Custom nginx | 8088 | Static SPA + reverse proxy |
+
+**Runtime image:** `mcr.microsoft.com/dotnet/aspnet:10.0` — `curl` installed via `apt-get` for Docker health checks.
+**Dockerfile:** Parameterized with `ARG PROJECT_NAME=WebhookService.API` — single file builds all three .NET services.
 
 ## Tools
 
 ### RotatePassword
-- CLI tool for generating BCrypt password hashes
+- CLI for generating BCrypt password hashes
 - Usage: `dotnet run --project tools/RotatePassword -- --password 'mypassword'`
-- Or interactively: `dotnet run --project tools/RotatePassword`
-- Or with auto-update: `dotnet run --project tools/RotatePassword -- --password 'pass' --update-env .env`
 - Output: BCrypt hash (starts with `$2`)
-- Used to generate `AUTH_PASSWORD_HASH` for `.env` file
-- Never commit raw passwords; only store BCrypt hashes
+- Warning: Single-quote the hash in `.env` — `AUTH_PASSWORD_HASH='$2b$12$...'`
+  Dollar signs followed by letters (e.g. `$fekMo4`) are interpolated as variables by Docker Compose
 
 ## Key Config / Env
 ```
-WEBHOOK_BASE_URL          — public base URL for generated webhook URLs
-                            Local:  http://localhost:8088
-                            ngrok:  https://your-domain.ngrok.app
-                            appsettings.json default: "" (empty — validator fires if unset)
-                            appsettings.Development.json default: http://localhost:8080
-
-⚠  docker-compose.override.yml — was previously hardcoding http://localhost:8088 for
-   Webhook__BaseUrl, overriding the .env value. Fixed 2026-05-08 to use ${WEBHOOK_BASE_URL}.
-   If the wrong URL appears, ensure the container was recreated after updating .env:
-   docker compose up -d --force-recreate api
+WEBHOOK_BASE_URL          — public base URL for webhook URLs (empty in appsettings.json → validator fires)
+                            Dev:   appsettings.Development.json → http://localhost:8080
+                            Local: set in .env → http://localhost:8088
+                            ngrok: set in .env → https://your-domain.ngrok.app
 
 AUTH_USERNAME             — single admin username
-AUTH_PASSWORD_HASH        — BCrypt hash (generate via HashGen tool, starts with $2)
-CORS_ALLOWED_ORIGINS      — comma-separated (dev: http://localhost:4200)
-Webhook:ReceiverRateLimitPerSecond — receiver rate limit (default 5/sec)
-Webhook:RetentionDays     — request retention (default 7)
-ConnectionStrings__WebhookDb — MSSQL connection string
-SEQ_URL                   — Seq ingest endpoint (optional, localhost only)
+AUTH_PASSWORD_HASH        — BCrypt hash, single-quoted in .env to prevent $ interpolation
+AUTH_SESSION_HOURS        — cookie sliding expiry (default 8)
+CORS_ALLOWED_ORIGINS      — comma-separated origins (dev: http://localhost:4200)
+
+WEBHOOK_WORKER_ID         — StreamWorker Redis consumer group name
+                            Compose: stream-worker-1 | Fallback: consumer-{MachineName}
+                            Must be stable across restarts — changing it orphans PEL entries
+
+ConnectionStrings__WebhookDb  — MSSQL connection string
+ConnectionStrings__Redis      — Redis host:port (e.g. redis:6379)
+Webhook:RetentionDays         — request retention in days (default 7)
+Webhook:MaxRequestSizeMb      — Kestrel body size limit, API only (default 5)
+Webhook:ReceiverRateLimitPerSecond — webhook receiver rate limit (default 5/sec)
 ```

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-08 | Updated: GetToken/GetTokens handlers now use IOptions<WebhookOptions> instead of IConfiguration -->
+<!-- Generated: 2026-05-10 | Updated: IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces; StreamWorker + JobsWorker key files; session revocation; SseNotifier per-connection limit -->
 
 # Backend Architecture
 
@@ -36,91 +36,103 @@ DELETE /api/tokens/{tokenId}/requests/{id}        → DeleteRequestCommand
 ```
 */webhook/{token:guid}   → WebhookController.Receive (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)
   [EnableRateLimiting("webhook-receiver")]
-  ├─ Active token:      custom status + custom headers + custom body (if set) + SSE notify + 200
-  ├─ Inactive token:    410 Gone + persists request for audit (no SSE)
-  └─ Rate limited:      429 Too Many Requests
+  ├─ ITokenCache.GetOrLoadAsync → DB fallback (includes inactive tokens)
+  ├─ Read body: try/catch IOException → BadHttpRequestException
+  ├─ IRequestQueuePublisher.PublishAsync → XADD webhook-requests (Redis stream)
+  ├─ Active token:   return CustomResponse (or 200)
+  ├─ Inactive token: return 410 Gone (audit persisted by StreamWorker)
+  └─ Rate limited:   429 Too Many Requests
 ```
 
-### Health
+### Health (AllowAnonymous)
 ```
-GET /health/live   → AllowAnonymous, no checks
-GET /health/ready  → AllowAnonymous, SqlServer ping
+GET /health/live   → no checks (API + StreamWorker + JobsWorker)
+GET /health/ready  → SqlServer ping [+Redis ping for StreamWorker]
 ```
 
 ## Middleware Chain (ordered)
 ```
-ForwardedHeaders → GlobalExceptionMiddleware → CORS → RateLimiter → Authentication → Authorization
+ForwardedHeaders → GlobalExceptionMiddleware → CORS → RateLimiter → Authentication → Antiforgery → Authorization
   ├─ GlobalExceptionMiddleware: SSE guard [if (Response.HasStarted) return;]
   ├─ RateLimiter: login (5/min), webhook-receiver (per WebhookOptions)
-  ├─ Antiforgery: X-XSRF-TOKEN required on state-changing requests
-  └─ Authorization: fallback requires auth [AllowAnonymous] on public routes
-```
-
-## Receiver Custom Response (New 2026-05-07)
-- CustomResponse.Headers field stored as JSON string
-- Receiver: deserializes headers, writes to Response.Headers
-- Rate limiting: webhook-receiver policy applies → Authentication → Authorization
-  ├─ GlobalExceptionMiddleware: catches exceptions, guards SSE with `if (Response.HasStarted) return;`
-  ├─ RateLimiter: `login` policy (5/min), `webhook-receiver` policy (per WebhookOptions)
-  ├─ Antiforgery: `X-XSRF-TOKEN` required on POST/PUT/DELETE
-  └─ Authorization: fallback policy requires auth unless [AllowAnonymous]
-```
-
-## Receiver with Custom Response Headers (New 2026-05-07)
-
-When token has CustomResponse set:
-1. Headers field (JSON string) parsed via `JsonSerializer.Deserialize()`
-2. Each header key/value written directly to `Response.Headers`
-3. Response sent with custom status code + body + applied headers
-4. Receiver rate limit: `webhook-receiver` policy (enables resilience)
-→ Authentication → Authorization → Controllers
+  ├─ Antiforgery: X-XSRF-TOKEN required on POST/PUT/DELETE
+  └─ Authorization: fallback requires auth; [AllowAnonymous] on public routes
 ```
 
 ## Exception Handling (GlobalExceptionMiddleware)
 ```
 OperationCanceledException (RequestAborted)  → silent swallow (normal SSE disconnect)
 ValidationException                          → 422 Unprocessable Entity + field errors
-BadHttpRequestException                      → 400 Bad Request or 413 Payload Too Large
+BadHttpRequestException                      → status code from ex.StatusCode (400 or 413)
 Exception (unhandled)                        → 500 Internal Server Error (logged, not exposed)
 
 SSE Safety: writes guarded by context.Response.HasStarted check
 ```
 
-## Key Files
+## Service Interfaces
 ```
-src/WebhookService.API/Program.cs                               (DI, middleware, EnableRetryOnFailure 3×2s)
-src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs  (BadHttpRequestException handler, SSE guard)
-src/WebhookService.API/Controllers/AuthController.cs           (login/logout/me)
-src/WebhookService.API/Controllers/WebhookController.cs        (receiver: GetByTokenIncludingInactiveAsync, 410 Gone, catch IOException)
-src/WebhookService.API/Controllers/SseController.cs            (SSE subscribe/stream)
+IRequestQueuePublisher  (Domain)              → RedisStreamPublisher (XADD webhook-requests)
+ITokenCache             (Application/Caching) → RedisTokenCache (IMemoryCache, 5-min sliding)
+ISseNotifier            (Domain)              → SseNotifier (ConcurrentDictionary<Guid, Channel<SseEvent>>)
+ISessionRevocationStore (API/Services)        → RedisSessionRevocationStore (in-memory for now)
+```
+
+## Token Command Cache Invalidation
+All four mutating token commands call `ITokenCache.Remove(tokenId)` after DB write:
+```
+DeleteTokenCommand → DeleteTokenCommandHandler → repo.DeleteAsync → cache.Remove
+UpdateTokenCommand → UpdateTokenCommandHandler → repo.UpdateAsync → cache.Remove
+SetCustomResponseCommand → ... → cache.Remove
+ResetCustomResponseCommand → ... → cache.Remove
+```
+
+## Key Files — API
+```
+src/WebhookService.API/Program.cs                               (DI: AddCoreInfrastructure + AddApiInfrastructure)
+src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs  (BadHttpRequestException, SSE guard)
+src/WebhookService.API/Controllers/AuthController.cs           (login/logout/me + ISessionRevocationStore)
+src/WebhookService.API/Controllers/WebhookController.cs        (receiver: ITokenCache, IRequestQueuePublisher)
+src/WebhookService.API/Controllers/SseController.cs            (SSE subscribe, 10-connection cap)
 src/WebhookService.API/Controllers/TokensController.cs         (CRUD + custom-response)
 src/WebhookService.API/Controllers/RequestsController.cs       (paging, export, delete)
-src/WebhookService.Application/Common/Behaviors/ValidationBehavior.cs
-src/WebhookService.Application/Common/Behaviors/LoggingBehavior.cs
-src/WebhookService.Infrastructure/Persistence/Repositories/WebhookRequestRepository.cs (ThenByDescending(r => r.Id) for determinism)
-src/WebhookService.Infrastructure/Persistence/Configurations/WebhookRequestConfiguration.cs (ReceivedAt: datetimeoffset(7))
-src/WebhookService.Infrastructure/Sse/SseNotifier.cs           (ConcurrentDictionary<Guid, Channel>)
-src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs
+src/WebhookService.API/Services/ISessionRevocationStore.cs
+src/WebhookService.API/Services/RedisSessionRevocationStore.cs
+```
+
+## Key Files — Infrastructure
+```
+src/WebhookService.Infrastructure/DependencyInjection.cs       (AddCoreInfrastructure, AddApiInfrastructure, AddStreamWorkerInfrastructure, AddJobsWorkerInfrastructure)
+src/WebhookService.Infrastructure/Redis/RedisStreamPublisher.cs (XADD webhook-requests)
+src/WebhookService.Infrastructure/Redis/RedisTokenCache.cs      (IMemoryCache wrapper, 5-min sliding)
+src/WebhookService.Infrastructure/Redis/RedisStreamConsumerService.cs (XREADGROUP, PEL recovery, XACK)
+src/WebhookService.Infrastructure/Redis/RedisSseBridgeService.cs (SUBSCRIBE sse:* → SseNotifier)
+src/WebhookService.Infrastructure/Sse/SseNotifier.cs            (Channel<SseEvent>, max 10/token)
+src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs (24h PeriodicTimer)
+src/WebhookService.Infrastructure/Persistence/ApplicationDbContext.cs
+src/WebhookService.Infrastructure/Persistence/Repositories/WebhookRequestRepository.cs (ThenByDescending Id for determinism)
+src/WebhookService.Application/Caching/ITokenCache.cs
+src/WebhookService.Domain/Services/IRequestQueuePublisher.cs
+src/WebhookService.Domain/Services/ISseNotifier.cs
+```
+
+## Key Files — Workers
+```
+src/WebhookService.StreamWorker/Program.cs   (AddCoreInfrastructure + AddStreamWorkerInfrastructure; Polly DB wait; /health/live + /health/ready)
+src/WebhookService.JobsWorker/Program.cs     (AddCoreInfrastructure + AddJobsWorkerInfrastructure; Polly DB wait; SQL-only health check)
 ```
 
 ## Options (validated at startup)
 ```
-Webhook:BaseUrl          (required, must be non-empty — validator rejects blank)
-                         Default in appsettings.json: "" (forces explicit config)
-                         Dev default in appsettings.Development.json: http://localhost:8080
-                         Production: set WEBHOOK_BASE_URL env var
-Webhook:RetentionDays    — requests older than N days cleaned up
-Webhook:MaxRequestSizeMb — Kestrel body size limit
-Auth:Username            (required)
-Auth:PasswordHash        (required, must start with $2 — BCrypt)
-Auth:SessionHours        — cookie sliding expiry
+Webhook:BaseUrl          (required) — used by API only; workers don't need it
+Webhook:RetentionDays    — used by JobsWorker's RetentionCleanupService
+Webhook:MaxRequestSizeMb — Kestrel body size limit (API only)
+Auth:Username / PasswordHash / SessionHours — API only
+WEBHOOK_WORKER_ID        — StreamWorker consumer identity; stable across restarts
 ```
-
-## WebhookUrl Computation
-`webhookUrl` is NOT stored in the database. Computed at read time in `WebhookTokenExtensions.ToDto(baseUrl)`.
-Both `GetTokenQueryHandler` and `GetTokensQueryHandler` use `IOptions<WebhookOptions>` (not raw `IConfiguration`)
-to access `BaseUrl` — consistent with `CreateTokenCommandHandler`.
 
 ## IDOR Protection
 `GetRequestById`, `ExportRequest`, `DeleteRequest` all include `WHERE TokenId = @tokenId`
 
+## WebhookUrl Computation
+`webhookUrl` is NOT stored in DB. Computed at read time via `WebhookTokenExtensions.ToDto(baseUrl)`.
+Both `GetTokenQueryHandler` and `GetTokensQueryHandler` use `IOptions<WebhookOptions>` for `BaseUrl`.

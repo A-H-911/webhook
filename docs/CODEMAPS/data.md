@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-07 | Updated: batched retention cleanup (5k rows/loop), search constraints on Method/Path/IpAddress -->
+<!-- Generated: 2026-05-10 | Updated: ITokenCache abstraction replaces raw IMemoryCache; retention runs in JobsWorker process; Redis stream schema note -->
 
 # Data Architecture
 
@@ -54,10 +54,12 @@ WebhookTokens (1) ──< WebhookRequests (many)
 - Migrations: `src/WebhookService.Infrastructure/Migrations/`
 - Initial migration: `20260504115509_InitialCreate`
 
-## Retention (Updated 2026-05-07)
-`RetentionCleanupService` deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`. 
+## Retention (Updated 2026-05-10)
+`RetentionCleanupService` runs in the **`WebhookService.JobsWorker`** process (not the API).
+Deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`.
 Cleanup is batched: delete 5k rows per loop iteration (prevents timeout on large datasets).
 Inactive tokens' requests are retained for audit trail.
+`jobs-worker` must run as **single replica only** — no leader election exists.
 
 ## Request Search (Updated 2026-05-07)
 Dashboard search box filters requests by:
@@ -67,10 +69,20 @@ Dashboard search box filters requests by:
 - Minimum length: 2 characters to prevent broad scans
 
 ## Token Cache
-`IMemoryCache` key `"token:{guid}"` — 5-minute sliding expiration.
+`ITokenCache` (→ `RedisTokenCache`, backed by `IMemoryCache`) key `"token:{guid}"` — 5-minute sliding expiration.
 `GetByTokenIncludingInactiveAsync` retrieves both active and inactive tokens (used by receiver path).
-Invalidated (`cache.Remove`) on update, delete, set/reset custom-response.
+`ITokenCache.Remove(tokenId)` called by all four token mutation handlers.
 Null results are never cached.
+
+## Redis Stream Schema
+```
+Stream key: webhook-requests
+Consumer group: webhook-api
+Entry fields:
+  payload  — JSON-serialized WebhookRequest (method, path, queryString, headers, body, ipAddress, tokenId, receivedAt)
+Consumer name: WEBHOOK_WORKER_ID env var, fallback "consumer-{MachineName}"
+PEL recovery: XREADGROUP "0-0" drains unACKed entries from previous run on startup
+```
 
 ## Webhook Receiver Path
 - Active token: persists request, notifies SSE subscribers, returns 200 (or custom response)
