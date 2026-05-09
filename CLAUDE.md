@@ -93,12 +93,16 @@ API → Application → Domain
 Infrastructure → Application → Domain
 ```
 
+Three deployable units share the same Domain/Application/Infrastructure libraries, SQL DB, and Redis:
+
 ```
 src/
   WebhookService.Domain/          # Entities, value objects, repository interfaces, ISseNotifier
   WebhookService.Application/     # CQRS handlers (MediatR), DTOs, validation behaviors
-  WebhookService.Infrastructure/  # EF Core (MSSQL), SseNotifier, RetentionCleanupService
-  WebhookService.API/             # ASP.NET Core endpoints, Swagger, GlobalExceptionMiddleware
+  WebhookService.Infrastructure/  # EF Core (MSSQL), SseNotifier, RedisSseBridgeService, stream consumer, retention
+  WebhookService.API/             # ASP.NET Core HTTP endpoints — AddCoreInfrastructure + AddApiInfrastructure
+  WebhookService.StreamWorker/    # Redis stream consumer worker — AddCoreInfrastructure + AddStreamWorkerInfrastructure
+  WebhookService.JobsWorker/      # Retention cleanup worker — AddCoreInfrastructure + AddJobsWorkerInfrastructure
 frontend/webhook-spa/             # Angular 21 standalone components, Angular Material, SSE client
 tests/
   WebhookService.UnitTests/       # xUnit — domain entity tests, no infrastructure
@@ -117,7 +121,7 @@ docker/
 
 **SSE endpoint:** `GET /api/tokens/{tokenId}/sse` — not `/api/events/`. Max 10 concurrent connections per token. Response starts with `retry: 5000\n\n`. **Wire event name is `event: request`** (not `new-request`) — Angular `SseService` calls `es.addEventListener('request', ...)` and maps internally to `{ eventType: 'new-request' }`. The `onopen` handler emits `{ eventType: 'connected' }` so the green dot appears immediately on connect.
 
-**Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. Hangfire is not used. DB errors are caught and logged without stopping the timer.
+**Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. It runs in the **`WebhookService.JobsWorker`** process (not the API). Hangfire is not used. DB errors are caught and logged without stopping the timer. `jobs-worker` must run as **single replica only** — no leader election exists.
 
 **Token cache:** `IMemoryCache` key `"token:{guid}"` with 5-minute sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found. Both active and inactive tokens are cached (receiver needs fast 410 lookup). `SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`, and `UpdateToken` all call `cache.Remove(tokenId)` after mutating.
 
@@ -145,9 +149,11 @@ docker/
 
 ## Docker Compose Services
 
-| Service | Dockerfile | Host Port |
+| Service | Dockerfile / args | Host Port |
 |---------|-----------|-----------|
-| `api` | `./Dockerfile` (repo root, context `.`) | 8080 |
+| `api` | `./Dockerfile` `PROJECT_NAME=WebhookService.API` | 8080 |
+| `stream-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.StreamWorker` | none (internal only) |
+| `jobs-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.JobsWorker` (single replica) | none (internal only) |
 | `frontend` | `docker/frontend/Dockerfile` (context `.`) | 8088 |
 | `sqlserver` | `docker/sqlserver/Dockerfile` | 1433 |
 | `seq` | `datalust/seq:latest` (no build) | 5341 (ingest, localhost only), 5342 (UI, localhost only) |
@@ -177,8 +183,11 @@ Files where knowing their location saves substantial search time:
 | `src/WebhookService.Application/Common/Behaviors/ValidationBehavior.cs` | MediatR pipeline — runs FluentValidation before every handler |
 | `src/WebhookService.Application/Common/Behaviors/LoggingBehavior.cs` | MediatR pipeline — logs request/response with timing |
 | `src/WebhookService.Infrastructure/Persistence/ApplicationDbContext.cs` | EF Core DbContext; entity configurations via `IEntityTypeConfiguration<T>` |
+| `src/WebhookService.Infrastructure/DependencyInjection.cs` | Four focused DI extensions: `AddCoreInfrastructure`, `AddApiInfrastructure`, `AddStreamWorkerInfrastructure`, `AddJobsWorkerInfrastructure` |
 | `src/WebhookService.Infrastructure/Sse/SseNotifier.cs` | `ConcurrentDictionary` of `Channel<SseEvent>` per token; `TryWrite` O(1) |
 | `src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs` | `PeriodicTimer` (24h) cleanup; `IServiceScopeFactory` for scoped DbContext |
+| `src/WebhookService.StreamWorker/Program.cs` | StreamWorker entry point: `AddCoreInfrastructure + AddStreamWorkerInfrastructure`; polls DB readiness via Polly; `/health/live` + `/health/ready` |
+| `src/WebhookService.JobsWorker/Program.cs` | JobsWorker entry point: `AddCoreInfrastructure + AddJobsWorkerInfrastructure`; polls DB readiness via Polly; `/health/live` + `/health/ready` (SQL-only) |
 | `docker/sqlserver/entrypoint.sh` | Polls until SQL Server is ready, then runs `init.sql` |
 | `docker/frontend/nginx.conf` | Reverse proxy config; `proxy_buffering off` for SSE; security headers (HSTS, CSP, Permissions-Policy) |
 | `frontend/webhook-spa/src/app/services/sse.service.ts` | Angular SSE client; maps wire `event: request` → `eventType: 'new-request'` |
@@ -271,6 +280,10 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Receiver uses `GetByTokenIncludingInactiveAsync`, not `GetByTokenAsync` | Dashboard queries filter `IsActive=1` but receiver needs both states. Swapping methods causes inactive tokens to return 404 instead of 410. |
 | `tokenId` parameter in GetRequestById / ExportRequest / DeleteRequest repository methods | C# repository methods always include `tokenId` as a query filter (parameterized EF Core), preventing cross-token access. This is **not** raw SQL `WHERE` enforcement — it is enforced in C# method signatures. Single-admin deployment by design — no per-user tenancy. Removing the `tokenId` filter enables IDOR. |
 | Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph. |
+| `jobs-worker` runs as single replica only | `RetentionCleanupService` has no leader election. Running two replicas double-deletes rows on every 24h tick (benign but wasteful) and risks overlapping range scans causing deadlocks under high write load. Use `deploy.replicas: 1` in compose. |
+| `stream-worker` uses `WEBHOOK_WORKER_ID` env var for consumer name | Docker container IDs change on every `docker run`. If the consumer name changes, the old PEL entries are permanently orphaned in Redis — orphaned messages are never automatically reclaimed. Set `WEBHOOK_WORKER_ID=stream-worker-1` in compose. |
+| Workers poll `CanConnectAsync`, never call `MigrateAsync` | API is the sole migration runner. If workers call `MigrateAsync` concurrently, SQL Server may deadlock schema-lock operations on cold start. Workers wait on DB readiness; migration races are the API's responsibility. |
+| `RedisSseBridgeService` stays in the API, not the StreamWorker | It writes into the in-process `SseNotifier` channel — those channels only exist in the API process where SSE HTTP connections are held. Moving it to the worker makes SSE fan-out a no-op. |
 | `[AllowAnonymous]` on `WebhookController` | External callers never have credentials. Removing it breaks all webhook delivery. |
 | `[AllowAnonymous]` on `AuthController` | Login endpoint must be reachable before a session exists. Removing it creates an unbreakable auth loop. |
 | `.AllowAnonymous()` on both `MapHealthChecks` calls | Global fallback policy applies to minimal API endpoints too. Without this, Docker health checks return 401 and the container never becomes healthy. |
