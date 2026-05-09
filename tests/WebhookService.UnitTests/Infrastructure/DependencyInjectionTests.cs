@@ -121,6 +121,20 @@ public sealed class DependencyInjectionTests
             d.ImplementationType == typeof(RedisStreamConsumerService));
     }
 
+    // ── Obsolete shim removal gate ────────────────────────────────────────────
+
+    [Fact]
+    public void AddInfrastructure_IsRemoved()
+    {
+        // RED: fails while the [Obsolete] shim still exists; GREEN after Phase 4b removes it.
+        var method = typeof(DependencyInjection)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == "AddInfrastructure");
+
+        method.Should().BeNull(
+            "AddInfrastructure shim must be removed; callers must use focused extensions");
+    }
+
     // ── Obsolete shim back-compat ─────────────────────────────────────────────
 
     [Fact]
