@@ -135,7 +135,6 @@ builder.Services.AddAntiforgery(o =>
 builder.Services.AddApplication();
 builder.Services.AddCoreInfrastructure(builder.Configuration);
 builder.Services.AddApiInfrastructure();
-builder.Services.AddJobsWorkerInfrastructure();
 
 // CORS — entire block skipped if AllowedOrigins is empty/whitespace
 var rawOrigins = builder.Configuration["Cors:AllowedOrigins"] ?? string.Empty;

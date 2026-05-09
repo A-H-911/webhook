@@ -5,6 +5,7 @@
     <Project Path="src/WebhookService.Domain/WebhookService.Domain.csproj" />
     <Project Path="src/WebhookService.Infrastructure/WebhookService.Infrastructure.csproj" />
     <Project Path="src/WebhookService.StreamWorker/WebhookService.StreamWorker.csproj" />
+    <Project Path="src/WebhookService.JobsWorker/WebhookService.JobsWorker.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/RotatePassword/RotatePassword.csproj" />
