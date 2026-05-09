@@ -45,16 +45,32 @@ services:
     networks:
       - webhook-net
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - webhook-net
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        PROJECT_NAME: WebhookService.API
     ports:
       - "8080:8080"
     environment:
       ASPNETCORE_HTTP_PORTS: "8080"
       ASPNETCORE_ENVIRONMENT: "Production"
       ConnectionStrings__WebhookDb: "Server=sqlserver;Database=WebhookDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True"
+      ConnectionStrings__Redis: "redis:6379"
       Serilog__WriteTo__1__Name: "Seq"
       Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
       Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
@@ -69,8 +85,91 @@ services:
         condition: service_healthy
       seq:
         condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - webhook-net
+
+  stream-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_NAME: WebhookService.StreamWorker
+    container_name: webhook-stream-worker
+    hostname: stream-worker-1
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seq:
+        condition: service_started
+      api:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      ASPNETCORE_HTTP_PORTS: "8080"
+      WEBHOOK_WORKER_ID: "stream-worker-1"
+      ConnectionStrings__WebhookDb: "Server=sqlserver;Database=WebhookDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True"
+      ConnectionStrings__Redis: "redis:6379"
+      Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
+      Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
+      Webhook__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
+      Serilog__MinimumLevel__Default: "Information"
+      Serilog__WriteTo__1__Name: "Seq"
+      Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - webhook-net
+    restart: unless-stopped
+
+  jobs-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PROJECT_NAME: WebhookService.JobsWorker
+    container_name: webhook-jobs-worker
+    hostname: jobs-worker-1
+    deploy:
+      replicas: 1
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      seq:
+        condition: service_started
+      api:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__WebhookDb: "Server=sqlserver;Database=WebhookDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True"
+      ConnectionStrings__Redis: "redis:6379"
+      Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
+      Serilog__MinimumLevel__Default: "Information"
+      Serilog__WriteTo__1__Name: "Seq"
+      Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - webhook-net
+    restart: unless-stopped
 
   frontend:
     build:

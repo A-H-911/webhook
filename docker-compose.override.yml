@@ -7,6 +7,12 @@ services:
       Auth__Username: "${AUTH_USERNAME:-admin}"
       Auth__PasswordHash: "${AUTH_PASSWORD_HASH}"
       Auth__SessionHours: "${AUTH_SESSION_HOURS:-8}"
+  stream-worker:
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+  jobs-worker:
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
   sqlserver:
     ports:
       - "1433:1433"
