@@ -155,14 +155,19 @@ External callers ──────────────────► ANY /
                                │    WebhookService.API  (:8080)              │
                                │  UseForwardedHeaders() → real IP captured   │
                                │  Token CRUD · SSE stream · Webhook receiver │
-                               │  INSERT to DB → ISseNotifier.NotifyAsync()  │
-                               │  RetentionCleanupService (BackgroundService)│
-                               └──────┬─────────────────────────────────────┘
-                                      │
-                     ┌────────────────▼────────────────┐
-                     │  sqlserver (custom image)        │
-                     │  └── WebhookDb (tokens, requests)│
-                     └─────────────────────────────────┘
+                               │  XADD → webhook-requests stream (Redis)     │
+                               │  RedisSseBridgeService ← SUBSCRIBE sse:*    │
+                               └──────┬──────────────────────────────────────┘
+                                      │  shared Redis + SQL Server
+          ┌───────────────────────────┼──────────────────────────────┐
+          ▼                           ▼                               ▼
+┌─────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────┐
+│  WebhookService     │   │  WebhookService          │   │  sqlserver          │
+│  .StreamWorker      │   │  .JobsWorker             │   │  WebhookDb          │
+│  XREADGROUP →       │   │  RetentionCleanupService │   │  (tokens, requests) │
+│  SQL INSERT →       │   │  PeriodicTimer (24h)     │   └─────────────────────┘
+│  PUBLISH sse:{id}   │   │  single replica only     │
+└─────────────────────┘   └─────────────────────────┘
 
   ┌──────────────────────────────┐    ┌──────────────────────────────────┐
   │  SEQ (:5342 UI, localhost)   │    │  Nginx (:8088) + Angular SPA     │
@@ -170,7 +175,7 @@ External callers ──────────────────► ANY /
   └──────────────────────────────┘    └──────────────────────────────────┘
 ```
 
-**4 Docker services:** `sqlserver`, `seq`, `api`, `frontend`
+**7 Docker services:** `sqlserver`, `redis`, `seq`, `api`, `stream-worker`, `jobs-worker`, `frontend`
 
 ### 5.2 Stack
 
@@ -179,9 +184,10 @@ External callers ──────────────────► ANY /
 | Backend | .NET 10, ASP.NET Core, Clean Architecture (Domain → Application → Infrastructure → API) |
 | Frontend | Angular 21 (standalone components), Angular Material 3, SSE via EventSource |
 | Database | SQL Server 2022 Developer Edition |
-| Real-time | Server-Sent Events (in-process, no broker) |
+| Messaging | Redis 7 (stream for durable webhook ingestion; pub/sub for cross-process SSE fan-out) |
+| Real-time | Server-Sent Events — API fan-out via `RedisSseBridgeService` (subscribes `sse:*` channel) |
 | Logging | Serilog → SEQ |
-| Container | Docker Compose (4 services) |
+| Container | Docker Compose (7 services) |
 | Testing | xUnit + NSubstitute + FluentAssertions + Testcontainers + Playwright (backend); Vitest (Angular) |
 
 ---
@@ -223,21 +229,22 @@ External caller: POST http://hostname:8088/webhook/{guid}
                          headers(JSON), body, isBase64, contentType,
                          ipAddress, userAgent, sizeBytes, receivedAt=UtcNow }
 
-8. INSERT WebhookRequest to WebhookDb (~2–5 ms)
-   ⚠ ALWAYS persists request, regardless of token active state (audit trail for inactive tokens)
+8. Publish to Redis stream:
+   IRequestQueuePublisher.PublishAsync → XADD webhook-requests {payload: snapshotJson}
+   (StreamWorker picks this up asynchronously; DB write happens in worker, not API)
 
 9. Token state check:
-   ├─ ACTIVE token:   SSE notify (best-effort, error-isolated):
-   │                  try { await sseNotifier.NotifyAsync(tokenId, summaryDto) }
-   │                  catch { log warning — request already durable, SSE is best-effort }
-   │                  Return 200 OK or CustomResponse
+   ├─ ACTIVE token:   Return 200 OK or CustomResponse
+   │                  SSE notification delivered asynchronously:
+   │                    StreamWorker → PUBLISH sse:{tokenId} → RedisSseBridgeService
+   │                    → SseNotifier.NotifyAsync → HTTP SSE response
    │
    └─ INACTIVE token: Return 410 Gone (signals sender to stop retrying)
-                      Audit trail persisted in step 8; no SSE notification
+                      Audit trail still persisted by StreamWorker; no SSE notification
 
    CustomResponse set → configured status + headers + body
    Not set            → 200 OK {"message": "Webhook received."}
-   Active round-trip: ~5–15 ms | Inactive round-trip: ~3–8 ms
+   Active round-trip: ~3–8 ms (no DB write on hot path; StreamWorker persists async)
 ```
 
 ### Flow B — View Requests in SPA (SSE Live)
@@ -284,14 +291,15 @@ User deletes token
 ### Flow E — Retention Cleanup
 
 ```
-RetentionCleanupService (BackgroundService)
+RetentionCleanupService (in WebhookService.JobsWorker process — NOT the API)
   → PeriodicTimer(24h) — first tick is 24h after startup
   → Creates a new IServiceScope per tick (avoids captive DbContext dependency)
   → if (RetentionDays <= 0) skip — keep forever
   → cutoff = UtcNow - RetentionDays
-  → DELETE FROM WebhookRequests WHERE ReceivedAt < cutoff
+  → DELETE FROM WebhookRequests WHERE ReceivedAt < cutoff (batched 5k rows/loop)
   → log: "Retention cleanup deleted {Count} requests older than {Cutoff}"
   → DB errors are caught and logged; service continues on next tick regardless
+  ⚠ jobs-worker must run as single replica only — no leader election
 ```
 
 ---
@@ -556,15 +564,18 @@ WebhookService.sln
 │   │   │   └── IWebhookRequestRepository.cs    ← includes DeleteOlderThanAsync
 │   │   └── Services/
 │   │       ├── ISseNotifier.cs
+│   │       ├── IRequestQueuePublisher.cs        ← decouples receiver from Redis XADD
 │   │       └── SseEvent.cs                     ← record SseEvent(string EventName, string Data)
 │   │
 │   ├── WebhookService.Application/
+│   │   ├── Caching/
+│   │   │   └── ITokenCache.cs                  ← IMemoryCache abstraction (5-min sliding)
 │   │   ├── Tokens/Commands/
 │   │   │   ├── CreateToken/
-│   │   │   ├── UpdateToken/                    ← description + isActive
-│   │   │   ├── DeleteToken/                    ← soft-delete + hard-delete + cache + SSE notify
-│   │   │   ├── SetCustomResponse/              ← UPDATE + cache invalidate
-│   │   │   └── ResetCustomResponse/            ← clear + cache invalidate
+│   │   │   ├── UpdateToken/                    ← description + isActive + ITokenCache.Remove
+│   │   │   ├── DeleteToken/                    ← soft-delete + hard-delete + ITokenCache.Remove + SSE notify
+│   │   │   ├── SetCustomResponse/              ← UPDATE + ITokenCache.Remove
+│   │   │   └── ResetCustomResponse/            ← clear + ITokenCache.Remove
 │   │   ├── Tokens/Queries/
 │   │   │   ├── GetTokens/                      ← WHERE IsActive=1 only
 │   │   │   └── GetToken/                       ← returns null if inactive
@@ -600,21 +611,36 @@ WebhookService.sln
 │   │   │   │   └── WebhookRequestRepository.cs     ← AsNoTracking; DeleteOlderThanAsync; ThenByDescending(Id)
 │   │   │   └── Migrations/
 │   │   ├── BackgroundServices/
-│   │   │   └── RetentionCleanupService.cs      ← IServiceScopeFactory; try/catch; PeriodicTimer(24h)
+│   │   │   └── RetentionCleanupService.cs      ← IServiceScopeFactory; try/catch; PeriodicTimer(24h) — runs in JobsWorker
+│   │   ├── Redis/
+│   │   │   ├── RedisStreamPublisher.cs         ← IRequestQueuePublisher impl; XADD webhook-requests
+│   │   │   ├── RedisTokenCache.cs              ← ITokenCache impl; IMemoryCache 5-min sliding
+│   │   │   ├── RedisStreamConsumerService.cs   ← XREADGROUP; PEL recovery "0-0"; XACK; PUBLISH sse:{id}
+│   │   │   └── RedisSseBridgeService.cs        ← SUBSCRIBE sse:*; writes to SseNotifier; stays in API
 │   │   ├── Sse/
 │   │   │   ├── NullSseNotifier.cs              ← no-op; used in tests
-│   │   │   └── SseNotifier.cs                  ← ConcurrentDictionary; atomic count; bounded channels
-│   │   └── DependencyInjection.cs
+│   │   │   └── SseNotifier.cs                  ← ConcurrentDictionary; max 10/token; bounded channels
+│   │   └── DependencyInjection.cs              ← AddCoreInfrastructure / AddApiInfrastructure / AddStreamWorkerInfrastructure / AddJobsWorkerInfrastructure
 │   │
-│   └── WebhookService.API/
-│       ├── Controllers/
-│       │   ├── TokensController.cs
-│       │   ├── RequestsController.cs
-│       │   ├── WebhookController.cs            ← EnableBuffering; body reading; SSE notify
-│       │   └── SseController.cs                ← atomic connection check; SSE loop; ping timer
-│       ├── Middleware/
-│       │   └── GlobalExceptionMiddleware.cs    ← BadHttpRequestException (400/413); 422 for ValidationException; SSE guard
-│       └── Program.cs                          ← ForwardedHeaders; Kestrel limit; CORS; retry policy; Polly migrations
+│   ├── WebhookService.API/
+│   │   ├── Controllers/
+│   │   │   ├── TokensController.cs
+│   │   │   ├── RequestsController.cs
+│   │   │   ├── WebhookController.cs            ← ITokenCache lookup; IRequestQueuePublisher XADD; body reading
+│   │   │   ├── AuthController.cs               ← login/logout/me; ISessionRevocationStore
+│   │   │   └── SseController.cs                ← atomic connection check; SSE loop; ping timer
+│   │   ├── Middleware/
+│   │   │   └── GlobalExceptionMiddleware.cs    ← BadHttpRequestException (400/413); 422 for ValidationException; SSE guard
+│   │   ├── Services/
+│   │   │   ├── ISessionRevocationStore.cs
+│   │   │   └── RedisSessionRevocationStore.cs
+│   │   └── Program.cs                          ← AddCoreInfrastructure + AddApiInfrastructure; ForwardedHeaders; Kestrel; CORS; Polly migrations
+│   │
+│   ├── WebhookService.StreamWorker/
+│   │   └── Program.cs                          ← AddCoreInfrastructure + AddStreamWorkerInfrastructure; Polly DB wait; /health/live + /health/ready
+│   │
+│   └── WebhookService.JobsWorker/
+│       └── Program.cs                          ← AddCoreInfrastructure + AddJobsWorkerInfrastructure; Polly DB wait; SQL-only /health/ready
 │
 ├── tests/
 │   ├── WebhookService.UnitTests/
@@ -664,14 +690,19 @@ WebhookService.sln
 
 ### Services
 
-| Service | Image | External Port | Purpose |
-|---------|-------|--------------|---------|
+| Service | Image / Build Args | External Port | Purpose |
+|---------|-------------------|--------------|---------|
 | `sqlserver` | Custom (`docker/sqlserver/Dockerfile`) | `1433` | WebhookDb (SQL Server 2022 Developer) |
+| `redis` | `redis:7-alpine` | `127.0.0.1:6379` (localhost-only) | Webhook stream + SSE pub/sub + token cache |
 | `seq` | `datalust/seq:latest` | `127.0.0.1:5341` (ingest), `127.0.0.1:5342` (UI) | Structured logs — **localhost-only** |
-| `api` | Custom (`./Dockerfile`) | `8080` | ASP.NET Core API + BackgroundService |
+| `api` | `./Dockerfile` `PROJECT_NAME=WebhookService.API` | `8080` | ASP.NET Core API; migration runner; SSE fan-out |
+| `stream-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.StreamWorker` | none | Redis stream consumer → SQL persist → SSE publish |
+| `jobs-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.JobsWorker` | none | Retention cleanup — **single replica only** |
 | `frontend` | Custom (`docker/frontend/Dockerfile`) | `8088` | Nginx — Angular SPA + reverse proxy |
 
-> SEQ ports are bound to `127.0.0.1` and are inaccessible from external hosts by design. Access SEQ at `http://localhost:5342`.
+> SEQ and Redis ports are bound to `127.0.0.1` and are inaccessible from external hosts by design.
+> `jobs-worker` has `deploy.replicas: 1` — `RetentionCleanupService` has no leader election; running two replicas risks overlapping deletes.
+> `stream-worker` depends on `api: service_healthy` — ensures DB migrations run before the stream consumer starts.
 
 ### MSSQL Custom Image
 
@@ -762,6 +793,14 @@ All configuration is via environment variables.
 | `WEBHOOK__ReceiverRateLimitPerSecond` | No | `250` | 1–10000 | Max requests per second per token on the webhook receiver; uses token-bucket algorithm |
 | `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
 | `NGROK_AUTHTOKEN` | No | — | ngrok auth token | Required only when using `docker-compose.ngrok.yml` |
+| `WEBHOOK_WORKER_ID` | No | `consumer-{MachineName}` | Any stable string | Redis consumer group identity for `stream-worker`; **must be stable across restarts** to prevent PEL orphaning. Compose default: `stream-worker-1` |
+| `ConnectionStrings__Redis` | Yes (stream-worker) | — | `host:port` | Redis connection string for stream, pub/sub, and token cache (e.g. `redis:6379`) |
+
+> **`.env` quoting rule for `AUTH_PASSWORD_HASH`:** BCrypt hashes contain `$` followed by letters (e.g. `$b`, `$f`). Docker Compose interpolates `$letter...` sequences as variable names, silently corrupting the hash. Always single-quote the value in `.env`:
+> ```env
+> AUTH_PASSWORD_HASH='$2b$12$...'   # single quotes prevent $ interpolation
+> ```
+> Dollar signs followed by digits (`$2`, `$12`) are not valid variable names and are safe without quoting, but single-quoting the entire value is the safest practice.
 
 **Generating / rotating a BCrypt hash** — use the included rotation utility (recommended):
 
