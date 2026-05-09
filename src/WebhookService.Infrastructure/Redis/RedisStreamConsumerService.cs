@@ -24,7 +24,9 @@ internal sealed class RedisStreamConsumerService(
     private const int BatchSize = 20;
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(300);
 
-    private readonly string _consumerName =
+    private readonly string _consumerName = ResolveConsumerName();
+
+    private static string ResolveConsumerName() =>
         Environment.GetEnvironmentVariable("WEBHOOK_WORKER_ID")
         ?? $"consumer-{Environment.MachineName}";
 
