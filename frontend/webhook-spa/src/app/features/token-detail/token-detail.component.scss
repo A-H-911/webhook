@@ -269,6 +269,119 @@
   opacity: 0.75;
 }
 
+.ip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.threat-links {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  a {
+    font-size: 0.7rem;
+    color: var(--mat-sys-primary);
+    text-decoration: none;
+    padding: 1px 5px;
+    border: 1px solid var(--mat-sys-outline-variant);
+    border-radius: 4px;
+
+    &:hover { background: var(--mat-sys-surface-variant); }
+  }
+}
+
+.kv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+
+  td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--mat-sys-outline-variant);
+    word-break: break-all;
+  }
+}
+
+.kv-key {
+  font-weight: 500;
+  color: var(--mat-sys-on-surface-variant);
+  width: 35%;
+  vertical-align: top;
+}
+
+.kv-val {
+  font-family: monospace;
+}
+
+.note-view {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px dashed var(--mat-sys-outline-variant);
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 40px;
+
+  &:hover { background: var(--mat-sys-surface-variant); }
+}
+
+.note-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.875rem;
+}
+
+.note-placeholder {
+  flex: 1;
+  color: var(--mat-sys-on-surface-variant);
+  font-style: italic;
+  font-size: 0.875rem;
+}
+
+.note-edit-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--mat-sys-on-surface-variant);
+  flex-shrink: 0;
+}
+
+.note-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--mat-sys-outline);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  resize: vertical;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
+
+  &:focus {
+    outline: none;
+    border-color: var(--mat-sys-primary);
+  }
+}
+
+.note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 700px) {
   .panels {
     flex-direction: column;

@@ -71,6 +71,32 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   readonly totalPages = computed(() => Math.ceil(this.total() / PAGE_SIZE) || 1);
   readonly localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+  readonly parsedQueryParams = computed<[string, string][]>(() => {
+    const qs = this.selectedDetail()?.queryString;
+    if (!qs) return [];
+    const clean = qs.startsWith('?') ? qs.slice(1) : qs;
+    return [...new URLSearchParams(clean).entries()] as [string, string][];
+  });
+
+  readonly parsedFormValues = computed<[string, string][]>(() => {
+    const detail = this.selectedDetail();
+    if (!detail?.contentType?.includes('application/x-www-form-urlencoded')) return [];
+    let body = detail.body ?? '';
+    if (detail.isBodyBase64) {
+      try {
+        const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+        body = new TextDecoder('utf-8').decode(bytes);
+      } catch {
+        return [];
+      }
+    }
+    return [...new URLSearchParams(body).entries()] as [string, string][];
+  });
+
+  noteValue = '';
+  readonly noteEditing = signal(false);
+  readonly noteSaving = signal(false);
+
   get tokenId(): string {
     return this.route.snapshot.paramMap.get('id') ?? '';
   }
@@ -150,12 +176,40 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   selectRequest(req: RequestSummary): void {
     this.detailLoading.set(true);
     this.selectedDetail.set(null);
+    this.noteEditing.set(false);
     this.requestService.getRequestDetail(this.tokenId, req.id).subscribe({
       next: (detail) => {
         this.selectedDetail.set(detail);
         this.detailLoading.set(false);
       },
       error: () => this.detailLoading.set(false),
+    });
+  }
+
+  startNoteEdit(): void {
+    this.noteValue = this.selectedDetail()?.note ?? '';
+    this.noteEditing.set(true);
+  }
+
+  cancelNoteEdit(): void {
+    this.noteEditing.set(false);
+  }
+
+  saveNote(): void {
+    const detail = this.selectedDetail();
+    if (!detail) return;
+    const note = this.noteValue.trim() || null;
+    this.noteSaving.set(true);
+    this.requestService.updateNote(this.tokenId, detail.id, note).subscribe({
+      next: () => {
+        this.selectedDetail.update((d) => (d ? { ...d, note } : d));
+        this.noteSaving.set(false);
+        this.noteEditing.set(false);
+      },
+      error: () => {
+        this.noteSaving.set(false);
+        this.snackBar.open('Failed to save note', 'OK', { duration: 3000 });
+      },
     });
   }
 

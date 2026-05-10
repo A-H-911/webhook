@@ -39,4 +39,8 @@ export class RequestService {
     a.download = `request-${requestId}.json`;
     a.click();
   }
+
+  updateNote(tokenId: string, requestId: string, note: string | null): Observable<void> {
+    return this.http.patch<void>(`/api/tokens/${tokenId}/requests/${requestId}/note`, { note });
+  }
 }

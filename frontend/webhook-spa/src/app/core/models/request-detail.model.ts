@@ -12,4 +12,6 @@ export interface RequestDetail {
   sizeBytes: number;
   ipAddress: string;
   userAgent: string | null;
+  processingTimeMs: number | null;
+  note: string | null;
 }

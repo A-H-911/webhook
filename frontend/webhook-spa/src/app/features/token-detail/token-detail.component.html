@@ -122,11 +122,19 @@
             <span>{{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss.SSS' }} <span class="tz-hint">({{ localTz }})</span></span>
 
             <span class="detail-label">IP</span>
-            <span>{{ selectedDetail()!.ipAddress }}</span>
+            <span class="ip-row">
+              {{ selectedDetail()!.ipAddress }}
+              <span class="threat-links">
+                <a href="https://www.whois.com/whois/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">Whois</a>
+                <a href="https://www.shodan.io/host/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">Shodan</a>
+                <a href="https://www.virustotal.com/gui/ip-address/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">VirusTotal</a>
+                <a href="https://search.censys.io/hosts/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">Censys</a>
+              </span>
+            </span>
 
-            @if (selectedDetail()!.queryString) {
-              <span class="detail-label">Query</span>
-              <code>{{ selectedDetail()!.queryString }}</code>
+            @if (selectedDetail()!.processingTimeMs !== null) {
+              <span class="detail-label">Pipeline</span>
+              <span>{{ selectedDetail()!.processingTimeMs }} ms</span>
             }
 
             @if (selectedDetail()!.contentType) {
@@ -140,8 +148,36 @@
             }
           </div>
 
+          @if (parsedQueryParams().length > 0) {
+            <div class="section-title">Query Parameters</div>
+            <table class="kv-table">
+              <tbody>
+                @for (param of parsedQueryParams(); track param[0] + param[1]) {
+                  <tr>
+                    <td class="kv-key">{{ param[0] }}</td>
+                    <td class="kv-val">{{ param[1] }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+
           <div class="section-title">Headers</div>
           <pre class="code-block">{{ formatHeaders(selectedDetail()!.headers) }}</pre>
+
+          @if (parsedFormValues().length > 0) {
+            <div class="section-title">Form Values</div>
+            <table class="kv-table">
+              <tbody>
+                @for (param of parsedFormValues(); track param[0] + param[1]) {
+                  <tr>
+                    <td class="kv-key">{{ param[0] }}</td>
+                    <td class="kv-val">{{ param[1] }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
 
           @if (selectedDetail()!.body !== null) {
             <div class="section-title">
@@ -151,6 +187,29 @@
               }
             </div>
             <pre class="code-block body-block">{{ decodeBody(selectedDetail()!) }}</pre>
+          }
+
+          <div class="section-title">Note</div>
+          @if (noteEditing()) {
+            <div class="note-editor">
+              <textarea class="note-textarea" [(ngModel)]="noteValue" rows="3" maxlength="2000"
+                        placeholder="Add a note…"></textarea>
+              <div class="note-actions">
+                <button mat-button (click)="cancelNoteEdit()">Cancel</button>
+                <button mat-flat-button color="primary" [disabled]="noteSaving()" (click)="saveNote()">
+                  {{ noteSaving() ? 'Saving…' : 'Save' }}
+                </button>
+              </div>
+            </div>
+          } @else {
+            <div class="note-view" (click)="startNoteEdit()">
+              @if (selectedDetail()!.note) {
+                <span class="note-text">{{ selectedDetail()!.note }}</span>
+              } @else {
+                <span class="note-placeholder">Click to add a note…</span>
+              }
+              <mat-icon class="note-edit-icon">edit</mat-icon>
+            </div>
           }
         </div>
       }
