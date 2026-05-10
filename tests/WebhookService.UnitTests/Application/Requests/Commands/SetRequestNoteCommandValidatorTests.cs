@@ -23,6 +23,13 @@ public sealed class SetRequestNoteCommandValidatorTests
     }
 
     [Fact]
+    public void Validate_IsValid_WhenNoteIsWhitespaceOnly()
+    {
+        var result = _sut.TestValidate(new SetRequestNoteCommand(Guid.NewGuid(), Guid.NewGuid(), "   "));
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
     public void Validate_IsValid_WhenNoteIsExactly2000Chars()
     {
         var note = new string('x', 2000);

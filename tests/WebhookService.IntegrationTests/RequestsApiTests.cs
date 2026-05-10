@@ -187,6 +187,18 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
     }
 
     [Fact]
+    public async Task SetNote_Returns404_WhenRequestDoesNotExist()
+    {
+        var (tokenId, _) = await CreateTokenAsync();
+        var nonExistentId = Guid.NewGuid();
+
+        var patchResponse = await _client.PatchAsJsonAsync(
+            $"/api/tokens/{tokenId}/requests/{nonExistentId}/note",
+            new { note = "ghost" });
+        patchResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task ExportRequest_Returns200_WithJsonContent()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();

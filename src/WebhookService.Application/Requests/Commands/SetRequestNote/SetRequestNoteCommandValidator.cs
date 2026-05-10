@@ -2,7 +2,7 @@ using FluentValidation;
 
 namespace WebhookService.Application.Requests.Commands.SetRequestNote;
 
-internal sealed class SetRequestNoteCommandValidator : AbstractValidator<SetRequestNoteCommand>
+public sealed class SetRequestNoteCommandValidator : AbstractValidator<SetRequestNoteCommand>
 {
     public SetRequestNoteCommandValidator()
     {

@@ -125,10 +125,10 @@
             <span class="ip-row">
               {{ selectedDetail()!.ipAddress }}
               <span class="threat-links">
-                <a href="https://www.whois.com/whois/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">Whois</a>
-                <a href="https://www.shodan.io/host/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">Shodan</a>
-                <a href="https://www.virustotal.com/gui/ip-address/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">VirusTotal</a>
-                <a href="https://search.censys.io/hosts/{{ selectedDetail()!.ipAddress }}" target="_blank" rel="noopener noreferrer">Censys</a>
+                <a [href]="threatLinks().whois" target="_blank" rel="noopener noreferrer">Whois</a>
+                <a [href]="threatLinks().shodan" target="_blank" rel="noopener noreferrer">Shodan</a>
+                <a [href]="threatLinks().virustotal" target="_blank" rel="noopener noreferrer">VirusTotal</a>
+                <a [href]="threatLinks().censys" target="_blank" rel="noopener noreferrer">Censys</a>
               </span>
             </span>
 

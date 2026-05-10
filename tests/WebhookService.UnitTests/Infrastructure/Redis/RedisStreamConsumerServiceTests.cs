@@ -341,9 +341,10 @@ public sealed class RedisStreamConsumerServiceTests
         // Act
         await RunCycleAsync(BuildService(repo));
 
-        // Assert — ProcessingTimeMs must be set and non-negative
+        // Assert — ProcessingTimeMs must be set and reflect the ~1 second queue delay
         captured.Should().NotBeNull("StreamWorker must set ProcessingTimeMs before persisting");
-        captured.Should().BeGreaterThanOrEqualTo(0);
+        captured.Should().BeGreaterThanOrEqualTo(1000, "ReceivedAt is 1 second in the past");
+        captured.Should().BeLessThan(60_000, "sanity check: timestamp arithmetic must not be inverted");
     }
 
     [Fact]

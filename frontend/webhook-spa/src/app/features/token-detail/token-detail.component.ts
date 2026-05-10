@@ -93,6 +93,16 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     return [...new URLSearchParams(body).entries()] as [string, string][];
   });
 
+  readonly threatLinks = computed(() => {
+    const ip = encodeURIComponent(this.selectedDetail()?.ipAddress ?? '');
+    return {
+      whois: `https://www.whois.com/whois/${ip}`,
+      shodan: `https://www.shodan.io/host/${ip}`,
+      virustotal: `https://www.virustotal.com/gui/ip-address/${ip}`,
+      censys: `https://search.censys.io/hosts/${ip}`,
+    };
+  });
+
   noteValue = '';
   readonly noteEditing = signal(false);
   readonly noteSaving = signal(false);
