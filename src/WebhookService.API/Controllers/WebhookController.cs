@@ -97,6 +97,29 @@ public sealed class WebhookController(
         if (Request.ContentLength == 0)
             return (null, false, 0);
 
+        // The global antiforgery filter reads Request.Form for form-encoded content before
+        // this controller runs, exhausting the body stream. ReadFormAsync returns the cached
+        // parsed form regardless of stream position.
+        if (Request.HasFormContentType)
+        {
+            try
+            {
+                var form = await Request.ReadFormAsync(ct);
+                if (form.Count == 0)
+                    return (null, false, 0);
+
+                var encoded = string.Join("&", form.Select(f =>
+                    $"{Uri.EscapeDataString(f.Key)}={Uri.EscapeDataString(string.Join(",", f.Value.ToArray()))}"));
+                var byteLen = (long)Encoding.UTF8.GetByteCount(encoded);
+                return (encoded, false, byteLen);
+            }
+            catch (IOException ex)
+            {
+                logger.LogWarning(ex, "Failed to read form for token {Token}", token);
+                throw new BadHttpRequestException("Could not read request body.", StatusCodes.Status400BadRequest);
+            }
+        }
+
         try
         {
             using var ms = new MemoryStream();
