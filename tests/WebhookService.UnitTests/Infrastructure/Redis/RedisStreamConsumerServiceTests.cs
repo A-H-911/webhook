@@ -300,6 +300,52 @@ public sealed class RedisStreamConsumerServiceTests
             Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>());
     }
 
+    // ── ProcessingTimeMs ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ProcessEntryAsync_SetsProcessingTimeMs_NonNegative_BeforePersisting()
+    {
+        // Arrange — ReceivedAt in the past so elapsed ms >= 0
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        var receivedAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var request = new WebhookRequest
+        {
+            Id = Guid.NewGuid(),
+            TokenId = Guid.NewGuid(),
+            ReceivedAt = receivedAt,
+            Method = "POST",
+            Path = "/webhook/test",
+            Headers = "{}",
+            IpAddress = "1.2.3.4",
+            UserAgent = string.Empty,
+            SizeBytes = 0
+        };
+        var entry = new StreamEntry("5-1",
+            [new NameValueEntry("payload", JsonSerializer.Serialize(request))]);
+
+        long? captured = null;
+        repo.AddAsync(
+                Arg.Do<WebhookRequest>(r => captured = r.ProcessingTimeMs),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
+
+        // Act
+        await RunCycleAsync(BuildService(repo));
+
+        // Assert — ProcessingTimeMs must be set and non-negative
+        captured.Should().NotBeNull("StreamWorker must set ProcessingTimeMs before persisting");
+        captured.Should().BeGreaterThanOrEqualTo(0);
+    }
+
     [Fact]
     public async Task ProcessEntryAsync_PublishSseFails_StillAcksEntry()
     {

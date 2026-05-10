@@ -17,5 +17,6 @@ internal sealed class GetRequestByIdQueryHandler(IWebhookRequestRepository repos
     private static WebhookRequestDetailDto ToDetail(WebhookRequest r) => new(
         r.Id, r.TokenId, r.Method, r.Path, r.QueryString,
         r.ReceivedAt, r.ContentType, r.Headers, r.Body,
-        r.IsBodyBase64, r.SizeBytes, r.IpAddress, r.UserAgent);
+        r.IsBodyBase64, r.SizeBytes, r.IpAddress, r.UserAgent,
+        r.ProcessingTimeMs, r.Note);
 }

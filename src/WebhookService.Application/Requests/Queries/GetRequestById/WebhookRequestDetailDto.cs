@@ -13,4 +13,6 @@ public sealed record WebhookRequestDetailDto(
     bool IsBodyBase64,
     long SizeBytes,
     string IpAddress,
-    string? UserAgent);
+    string? UserAgent,
+    long? ProcessingTimeMs,
+    string? Note);

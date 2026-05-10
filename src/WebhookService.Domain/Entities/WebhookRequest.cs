@@ -15,6 +15,8 @@ public sealed class WebhookRequest
     public string IpAddress { get; init; } = "unknown";
     public string? UserAgent { get; init; }
     public long SizeBytes { get; init; }
+    public long? ProcessingTimeMs { get; set; }
+    public string? Note { get; init; }
 
     public WebhookToken? Token { get; init; }
 }

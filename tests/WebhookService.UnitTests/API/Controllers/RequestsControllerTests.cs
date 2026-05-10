@@ -36,7 +36,9 @@ public sealed class RequestsControllerTests
         IsBodyBase64: false,
         SizeBytes: 13,
         IpAddress: "127.0.0.1",
-        UserAgent: null);
+        UserAgent: null,
+        ProcessingTimeMs: null,
+        Note: null);
 
     // ── GetPaged ──────────────────────────────────────────────────────────────
 

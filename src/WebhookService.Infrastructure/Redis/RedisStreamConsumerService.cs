@@ -132,6 +132,8 @@ internal sealed class RedisStreamConsumerService(
                 return;
             }
 
+            request.ProcessingTimeMs = (long)(DateTimeOffset.UtcNow - request.ReceivedAt).TotalMilliseconds;
+
             await PersistAsync(request, ct);
 
             var summaryJson = BuildSummaryJson(request);

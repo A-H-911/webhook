@@ -114,7 +114,9 @@ public sealed class DtoMappingTests
             IsBodyBase64: false,
             SizeBytes: 1024,
             IpAddress: "192.168.1.1",
-            UserAgent: "TestAgent/1.0");
+            UserAgent: "TestAgent/1.0",
+            ProcessingTimeMs: 250,
+            Note: "a note");
 
         // Assert
         dto.Id.Should().Be(id);
@@ -130,6 +132,8 @@ public sealed class DtoMappingTests
         dto.SizeBytes.Should().Be(1024);
         dto.IpAddress.Should().Be("192.168.1.1");
         dto.UserAgent.Should().Be("TestAgent/1.0");
+        dto.ProcessingTimeMs.Should().Be(250);
+        dto.Note.Should().Be("a note");
     }
 
     [Fact]
@@ -149,13 +153,17 @@ public sealed class DtoMappingTests
             IsBodyBase64: false,
             SizeBytes: 0,
             IpAddress: "127.0.0.1",
-            UserAgent: null);
+            UserAgent: null,
+            ProcessingTimeMs: null,
+            Note: null);
 
         // Assert
         dto.QueryString.Should().BeNull();
         dto.ContentType.Should().BeNull();
         dto.Body.Should().BeNull();
         dto.UserAgent.Should().BeNull();
+        dto.ProcessingTimeMs.Should().BeNull();
+        dto.Note.Should().BeNull();
     }
 
     [Fact]
@@ -175,7 +183,9 @@ public sealed class DtoMappingTests
             IsBodyBase64: true,
             SizeBytes: 5,
             IpAddress: "10.0.0.1",
-            UserAgent: null);
+            UserAgent: null,
+            ProcessingTimeMs: null,
+            Note: null);
 
         // Assert
         dto.IsBodyBase64.Should().BeTrue();
@@ -190,8 +200,8 @@ public sealed class DtoMappingTests
         var tokenId = Guid.NewGuid();
         var receivedAt = DateTimeOffset.UtcNow;
 
-        var a = new WebhookRequestDetailDto(id, tokenId, "GET", "/x", null, receivedAt, null, "{}", null, false, 0, "1.1.1.1", null);
-        var b = new WebhookRequestDetailDto(id, tokenId, "GET", "/x", null, receivedAt, null, "{}", null, false, 0, "1.1.1.1", null);
+        var a = new WebhookRequestDetailDto(id, tokenId, "GET", "/x", null, receivedAt, null, "{}", null, false, 0, "1.1.1.1", null, null, null);
+        var b = new WebhookRequestDetailDto(id, tokenId, "GET", "/x", null, receivedAt, null, "{}", null, false, 0, "1.1.1.1", null, null, null);
 
         // Assert
         a.Should().Be(b);

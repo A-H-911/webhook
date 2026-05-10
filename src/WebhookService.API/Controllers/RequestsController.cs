@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using WebhookService.Application.Requests.Commands.ClearRequests;
 using WebhookService.Application.Requests.Commands.DeleteRequest;
+using WebhookService.Application.Requests.Commands.SetRequestNote;
 using WebhookService.Application.Requests.Queries.ExportRequest;
 using WebhookService.Application.Requests.Queries.GetRequestById;
 using WebhookService.Application.Requests.Queries.GetRequests;
@@ -53,4 +54,14 @@ public sealed class RequestsController(IMediator mediator) : ControllerBase
         var deleted = await mediator.Send(new DeleteRequestCommand(tokenId, id), ct);
         return deleted ? NoContent() : NotFound();
     }
+
+    [HttpPatch("{id:guid}/note")]
+    public async Task<IActionResult> SetNote(
+        Guid tokenId, Guid id, [FromBody] SetNoteRequest body, CancellationToken ct)
+    {
+        var found = await mediator.Send(new SetRequestNoteCommand(tokenId, id, body.Note), ct);
+        return found ? NoContent() : NotFound();
+    }
 }
+
+public sealed record SetNoteRequest(string? Note);

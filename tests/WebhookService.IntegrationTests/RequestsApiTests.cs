@@ -109,6 +109,83 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    // ── Note endpoint ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SetNote_Returns204_AndNoteIsReturnedInSubsequentDetail()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var patchResponse = await _client.PatchAsJsonAsync(
+            $"/api/tokens/{tokenId}/requests/{requestId}/note",
+            new { note = "test note text" });
+        patchResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var detail = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests/{requestId}"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        detail.GetProperty("note").GetString().Should().Be("test note text");
+    }
+
+    [Fact]
+    public async Task SetNote_Returns404_WhenRequestBelongsToWrongToken()
+    {
+        var (tokenAId, webhookTokenA) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookTokenA);
+
+        var listA = await (await _client.GetAsync($"/api/tokens/{tokenAId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = listA.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var (tokenBId, _) = await CreateTokenAsync();
+        var patchResponse = await _client.PatchAsJsonAsync(
+            $"/api/tokens/{tokenBId}/requests/{requestId}/note",
+            new { note = "should fail" });
+        patchResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task SetNote_WithNullNote_ClearsExistingNote()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        await _client.PatchAsJsonAsync(
+            $"/api/tokens/{tokenId}/requests/{requestId}/note", new { note = "to be cleared" });
+
+        var clearResponse = await _client.PatchAsJsonAsync(
+            $"/api/tokens/{tokenId}/requests/{requestId}/note", new { note = (string?)null });
+        clearResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var detail = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests/{requestId}"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        detail.GetProperty("note").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task SetNote_Returns422_WhenNoteExceedsMaxLength()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookToken);
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        var tooLong = new string('a', 2001);
+        var patchResponse = await _client.PatchAsJsonAsync(
+            $"/api/tokens/{tokenId}/requests/{requestId}/note", new { note = tooLong });
+        patchResponse.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
     [Fact]
     public async Task ExportRequest_Returns200_WithJsonContent()
     {

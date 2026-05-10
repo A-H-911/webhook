@@ -52,6 +52,14 @@ internal sealed class WebhookRequestRepository : IWebhookRequestRepository
         await _db.WebhookRequests.Where(r => r.TokenId == tokenId).ExecuteDeleteAsync(ct);
     }
 
+    public async Task<bool> UpdateNoteAsync(Guid id, Guid tokenId, string? note, CancellationToken ct = default)
+    {
+        var affected = await _db.WebhookRequests
+            .Where(r => r.Id == id && r.TokenId == tokenId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.Note, note), ct);
+        return affected > 0;
+    }
+
     public async Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, CancellationToken ct = default)
     {
         const int batchSize = 1000;

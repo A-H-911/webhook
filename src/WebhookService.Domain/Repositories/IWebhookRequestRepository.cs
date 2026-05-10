@@ -11,4 +11,5 @@ public interface IWebhookRequestRepository
     Task DeleteAsync(Guid id, CancellationToken ct = default);
     Task DeleteAllForTokenAsync(Guid tokenId, CancellationToken ct = default);
     Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, CancellationToken ct = default);
+    Task<bool> UpdateNoteAsync(Guid id, Guid tokenId, string? note, CancellationToken ct = default);
 }
