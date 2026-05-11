@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-10 | Updated: IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces; StreamWorker + JobsWorker key files; session revocation; SseNotifier per-connection limit -->
+<!-- Generated: 2026-05-11 | Updated: PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery now returns processingTimeMs + note fields -->
 
 # Backend Architecture
 
@@ -26,10 +26,11 @@ GET    /api/tokens/{id}/sse               → SseController.Subscribe
 ### Requests (requires auth, scoped to token)
 ```
 GET    /api/tokens/{tokenId}/requests             → GetRequestsQuery (paginated, searchable)
-GET    /api/tokens/{tokenId}/requests/{id}        → GetRequestByIdQuery
+GET    /api/tokens/{tokenId}/requests/{id}        → GetRequestByIdQuery  (returns processingTimeMs + note)
 GET    /api/tokens/{tokenId}/requests/{id}/export → ExportRequestQuery → File(json)
 DELETE /api/tokens/{tokenId}/requests             → ClearRequestsCommand
 DELETE /api/tokens/{tokenId}/requests/{id}        → DeleteRequestCommand
+PATCH  /api/tokens/{tokenId}/requests/{id}/note   → SetRequestNoteCommand → SetRequestNoteCommandHandler
 ```
 
 ### Webhook Receiver (AllowAnonymous, rate-limited)
@@ -130,8 +131,18 @@ Auth:Username / PasswordHash / SessionHours — API only
 WEBHOOK_WORKER_ID        — StreamWorker consumer identity; stable across restarts
 ```
 
+## Request Note Command
+```
+PATCH /api/tokens/{tokenId}/requests/{id}/note  [FromBody] { note: string|null }
+  → SetRequestNoteCommand(TokenId, RequestId, Note?) : IRequest<bool>
+  → SetRequestNoteCommandValidator: Note max 2000 chars (null allowed = clear note)
+  → IWebhookRequestRepository.UpdateNoteAsync → ExecuteUpdateAsync
+  Returns 200 OK / 404 Not Found
+```
+Key files: `src/WebhookService.Application/Requests/Commands/SetRequestNote/`
+
 ## IDOR Protection
-`GetRequestById`, `ExportRequest`, `DeleteRequest` all include `WHERE TokenId = @tokenId`
+`GetRequestById`, `ExportRequest`, `DeleteRequest`, `SetRequestNote` all include `WHERE TokenId = @tokenId`
 
 ## WebhookUrl Computation
 `webhookUrl` is NOT stored in DB. Computed at read time via `WebhookTokenExtensions.ToDto(baseUrl)`.

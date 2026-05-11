@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-10 | Updated: ITokenCache abstraction replaces raw IMemoryCache; retention runs in JobsWorker process; Redis stream schema note -->
+<!-- Generated: 2026-05-11 | Updated: ProcessingTimeMs + Note columns in WebhookRequests; covering index IX_WebhookRequests_TokenId_ReceivedAt_Id; 3 new migrations -->
 
 # Data Architecture
 
@@ -35,9 +35,12 @@ ContentType     NVARCHAR(256)     NULL
 IpAddress       NVARCHAR(45)      NOT NULL  (supports IPv6)
 UserAgent       NVARCHAR(512)     NULL
 SizeBytes       BIGINT            NOT NULL
+ProcessingTimeMs BIGINT           NULL      (set by StreamWorker after DB persist; null until processed)
+Note            NVARCHAR(2000)    NULL      (user-editable per-request note via PATCH /note)
 
-IX_WebhookRequests_TokenId                 (lookup by token)
-IX_WebhookRequests_ReceivedAt              (ordering)
+IX_WebhookRequests_TokenId                             (lookup by token)
+IX_WebhookRequests_ReceivedAt                          (ordering)
+IX_WebhookRequests_TokenId_ReceivedAt_Id  (covering)   (added 20260507; eliminates key lookup for paginated list)
 Primary ordering: ReceivedAt DESC, THEN Id DESC (deterministic pagination)
 ```
 
@@ -52,7 +55,15 @@ WebhookTokens (1) ──< WebhookRequests (many)
 - `CustomResponse` mapped as owned entity (inline columns, no separate table)
 - All reads use `.AsNoTracking()`
 - Migrations: `src/WebhookService.Infrastructure/Migrations/`
-- Initial migration: `20260504115509_InitialCreate`
+
+### Migration History
+| Migration | Date | Change |
+|-----------|------|--------|
+| `20260504115509_InitialCreate` | 2026-05-04 | Initial schema (WebhookTokens, WebhookRequests, CustomResponse owned entity) |
+| `20260506202000_PinReceivedAtPrecision` | 2026-05-06 | `ReceivedAt` pinned to `datetimeoffset(7)` for millisecond precision |
+| `20260507041721_AddCoveringIndexForPaginatedRequests` | 2026-05-07 | Covering index `IX_WebhookRequests_TokenId_ReceivedAt_Id` |
+| `20260510104619_AddProcessingTimeMs` | 2026-05-10 | `ProcessingTimeMs BIGINT NULL` column |
+| `20260510104653_AddRequestNote` | 2026-05-10 | `Note NVARCHAR(2000) NULL` column |
 
 ## Retention (Updated 2026-05-10)
 `RetentionCleanupService` runs in the **`WebhookService.JobsWorker`** process (not the API).

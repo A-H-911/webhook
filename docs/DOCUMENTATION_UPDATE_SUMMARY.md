@@ -1,3 +1,75 @@
+# Documentation Update Summary — 2026-05-11
+
+All documentation has been synchronized with the 2026-05-11 session changes (per-request notes, processing time, threat intelligence links, parsed query/form tables, test suite enhancements, rebuild scripts).
+
+## Files Updated
+
+### README.md
+
+**§3 Features**
+- Added: per-request notes (user-editable, PATCH endpoint)
+- Added: processing time chip (StreamWorker latency, nullable until processed)
+- Added: parsed display — query string and form body rendered as key-value tables
+- Added: threat intelligence links from IP address (Whois / Shodan / VirusTotal / Censys)
+
+**§7.1 Domain Entities — WebhookRequest**
+- Added `ProcessingTimeMs BIGINT NULL` and `Note NVARCHAR(2000) NULL` columns to entity table
+- Added covering index `TokenId + ReceivedAt + Id` to the indexes note
+
+**§7.2 DTOs**
+- `WebhookRequestDetailDto` now lists `ProcessingTimeMs (long?)` and `Note (string?)`
+
+**§7.3 API Contract — Request Management**
+- Added `PATCH /api/tokens/{tokenId}/requests/{id}/note` row
+
+**§7.5 CQRS Map — Request Commands**
+- Added `SetRequestNoteCommand` row
+- Annotated `GetRequestByIdQuery` to mention `ProcessingTimeMs + Note` in its return shape
+
+### docs/CODEMAPS/ (all five files)
+Already updated in the `/update-codemaps` run this session.
+
+### CLAUDE.md
+Already updated in Phase 7 (testing quick-ref + rebuild script gotcha).
+
+## Staleness Check
+
+All documentation files touched in the 2026-05-10 or 2026-05-11 sessions — no files exceed the 90-day staleness threshold.
+
+| File | Last Modified |
+|------|--------------|
+| README.md | 2026-05-11 |
+| CLAUDE.md | 2026-05-11 |
+| docs/CODEMAPS/backend.md | 2026-05-11 |
+| docs/CODEMAPS/frontend.md | 2026-05-11 |
+| docs/CODEMAPS/data.md | 2026-05-11 |
+| docs/CODEMAPS/dependencies.md | 2026-05-11 |
+| docs/CODEMAPS/INDEX.md | 2026-05-11 |
+
+## Summary
+
+```
+Documentation Update — 2026-05-11
+──────────────────────────────────────────────────────
+Updated:  README.md §3  (per-request notes, processing time, threat links, parsed display)
+Updated:  README.md §7.1 (ProcessingTimeMs + Note columns, covering index)
+Updated:  README.md §7.2 (WebhookRequestDetailDto — ProcessingTimeMs + Note fields)
+Updated:  README.md §7.3 (PATCH .../note endpoint row)
+Updated:  README.md §7.5 (SetRequestNoteCommand row; GetRequestByIdQuery annotation)
+Skipped:  README.md §13 (already updated in Phase 7 — rebuild script in step 3)
+Skipped:  CLAUDE.md (already updated in Phase 7 — rebuild script quick-ref)
+Flagged:  (none — all docs updated today)
+──────────────────────────────────────────────────────
+```
+
+## Generated
+
+**Date**: 2026-05-11
+**Generator**: /everything-claude-code:update-docs
+**Status**: Complete
+
+---
+
 # Documentation Update Summary — 2026-05-10
 
 All documentation has been synchronized with the 2026-05-10 session changes (three-process architecture).

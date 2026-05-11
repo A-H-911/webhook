@@ -1,6 +1,6 @@
 # Webhook Service — Codemaps Index
 
-**Last Updated:** 2026-05-10 (three-process architecture: api + stream-worker + jobs-worker; Redis stream/pub-sub; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces; DI split)
+**Last Updated:** 2026-05-11 (per-request notes PATCH endpoint; processingTimeMs + note fields; frontend computed signals; Vitest coverage thresholds; CI coverage enforcement + E2E job)
 
 ---
 
@@ -47,6 +47,38 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 
 ---
 
+## Recent Changes (as of 2026-05-11)
+
+### Backend
+- **PATCH `/api/tokens/{tokenId}/requests/{id}/note`** — new endpoint for per-request notes (max 2000 chars, null clears)
+- **`SetRequestNoteCommand` / `SetRequestNoteCommandHandler` / `SetRequestNoteCommandValidator`** — full CQRS stack
+- **`IWebhookRequestRepository.UpdateNoteAsync`** — `ExecuteUpdateAsync` (no EF tracking)
+- **`WebhookRequestDetailDto`** — now includes `ProcessingTimeMs` (long?) and `Note` (string?) fields
+- **`ProcessingTimeMs`** — computed in `RedisStreamConsumerService.ProcessEntryAsync` before `PersistAsync`
+
+### Database
+- **`WebhookRequests.ProcessingTimeMs`** — `BIGINT NULL` (migration `20260510104619_AddProcessingTimeMs`)
+- **`WebhookRequests.Note`** — `NVARCHAR(2000) NULL` (migration `20260510104653_AddRequestNote`)
+- **Covering index** `IX_WebhookRequests_TokenId_ReceivedAt_Id` (migration `20260507041721`)
+
+### Frontend
+- **`token-detail.component.ts`** — 3 new computed signals: `parsedQueryParams()`, `parsedFormValues()`, `threatLinks()`
+- **Note UX** — inline edit (`noteEditing`, `noteValue`, `noteText`, `startNoteEdit`, `saveNote`, `cancelNoteEdit`)
+- **`processingTimeMs` chip** — renders only when non-null; shows `"N ms"` in Pipeline detail row
+- **Threat intelligence links** — Whois / Shodan / VirusTotal / Censys anchors with `target="_blank"` + `rel="noopener"`
+- **`request.service.ts`** — `updateNote(tokenId, requestId, note)` → PATCH
+- **Test suite** — Vitest, 9 spec files, 118 tests, all green; thresholds: 80/75/80/80 (stmt/branch/fn/line)
+
+### CI
+- **`.github/workflows/ci.yml`** — `--settings tests/coverlet.runsettings` added to unit + integration dotnet test
+- **Frontend `coverage` step** — `npm test -- --watch=false --coverage` added to `frontend` job with artifact upload
+- **New `e2e-test` job** — uses `rebuild-and-wait.sh`, installs Chromium, runs E2E suite, uploads traces on failure
+
+### Tests (total)
+- **Backend unit:** 310 tests (all green)
+- **Frontend:** 118 tests (all green), 92%/84%/90%/93% stmt/branch/fn/line coverage
+- **E2E new:** 7 new tests in `NewFeatureE2ETests` (form body, processing time, notes, SSE live, threat links, export, delete+clear)
+
 ## Recent Changes (as of 2026-05-10)
 
 ### Architecture
@@ -64,9 +96,8 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 - **`RedisSseBridgeService`** — stays in API; subscribes to `sse:*` and writes to in-process `SseNotifier`
 - **Consumer name** — stable via `WEBHOOK_WORKER_ID` env var (prevents PEL orphaning on restart)
 - **Dockerfile** — parameterized with `ARG PROJECT_NAME`; `curl` installed for health checks
-- **`docker-compose.yml`** — `stream-worker` + `jobs-worker` services added; health checks use `curl`
 
-### Tests
+### Tests (as of 2026-05-10)
 - **373 tests total:** 286 unit + 47 integration + 40 E2E (all green)
 - **7 new branch-coverage tests** for `RedisStreamConsumerService` error containment zones
 - **New E2E tests:** `StreamWorkerE2ETests`, `JobsWorkerRetentionTests`, `ComprehensiveE2ETests`

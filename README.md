@@ -83,6 +83,10 @@ For local development without Docker:
 - **SSE connection safety** — max 10 concurrent connections per token; 11th connection receives HTTP 429
 - **Dark mode** — defaults to dark; user-toggleable, persisted in `localStorage`, flash-of-wrong-theme safe via inline script
 - **Cookie-based authentication** — single admin credential configured via env vars; BCrypt-hashed password; session cookie (`SameSite=Lax`, `HttpOnly`); see §11 Security Model
+- **Per-request notes** — user-editable freetext annotation (max 2,000 chars) attached to any captured request; inline editor in the UI; persisted via `PATCH /api/tokens/{tokenId}/requests/{id}/note`
+- **Processing time** — each request shows how long the StreamWorker took to persist it (measured in milliseconds, displayed as a chip in the request detail panel; `null` until the stream worker processes the entry)
+- **Parsed display** — query string parameters and form-encoded bodies rendered as interactive key-value tables in the request detail view
+- **Threat intelligence links** — one-click links from the captured IP address to Whois, Shodan, VirusTotal, and Censys for quick reputation lookups
 
 ---
 
@@ -347,8 +351,10 @@ RetentionCleanupService (in WebhookService.JobsWorker process — NOT the API)
 | `IpAddress` | `string` | Max 45 (IPv6); real IP via `X-Forwarded-For` |
 | `UserAgent` | `string?` | Max 512 |
 | `SizeBytes` | `long` | |
+| `ProcessingTimeMs` | `long?` | Stream-worker persist latency in ms; `null` until the entry is processed |
+| `Note` | `string?` | User-editable annotation; max 2,000 chars; set via `PATCH .../note` |
 
-**Indexes:** `WebhookToken.Token` (unique), `WebhookRequest.TokenId` (non-clustered), `WebhookRequest.ReceivedAt` (non-clustered).
+**Indexes:** `WebhookToken.Token` (unique), `WebhookRequest.TokenId` (non-clustered), `WebhookRequest.ReceivedAt` (non-clustered), `WebhookRequest.TokenId + ReceivedAt + Id` (covering — eliminates key lookup for paginated list query).
 
 ### 7.2 DTOs
 
@@ -362,7 +368,8 @@ RetentionCleanupService (in WebhookService.JobsWorker process — NOT the API)
 
 ```
 { Id, TokenId, Method, Path, QueryString, ReceivedAt, ContentType,
-  Headers (Dictionary<string,string>), Body, IsBodyBase64, SizeBytes, IpAddress, UserAgent }
+  Headers (Dictionary<string,string>), Body, IsBodyBase64, SizeBytes, IpAddress, UserAgent,
+  ProcessingTimeMs (long?), Note (string?) }
 ```
 
 **`WebhookTokenDto`**
@@ -400,6 +407,7 @@ RetentionCleanupService (in WebhookService.JobsWorker process — NOT the API)
 | `GET` | `/api/tokens/{tokenId}/requests/{id}/export` | `200 application/json` / `404` | `Content-Disposition: attachment; filename="request-{id}.json"` |
 | `DELETE` | `/api/tokens/{tokenId}/requests` | `204` | Clear all requests for token |
 | `DELETE` | `/api/tokens/{tokenId}/requests/{id}` | `204` / `404` | |
+| `PATCH` | `/api/tokens/{tokenId}/requests/{id}/note` | `200 bool` / `404` | Body: `{ "note": "string or null" }`; null clears the note; max 2,000 chars; `422` if note exceeds limit |
 
 #### Webhook Receiver
 
@@ -497,6 +505,7 @@ SseNotifier (singleton)
 |---------|--------|
 | `DeleteRequestCommand` | DELETE single request (verifies TokenId ownership) |
 | `ClearRequestsCommand` | DELETE all requests for token |
+| `SetRequestNoteCommand` | UPDATE `Note` column (null = clear); IDOR ownership check; validated max 2,000 chars |
 
 **Token Queries**
 
@@ -510,7 +519,7 @@ SseNotifier (singleton)
 | Query | Returns | Notes |
 |-------|---------|-------|
 | `GetRequestsQuery` | `PagedResult<SummaryDto>` | LIKE search on Headers+Body; ownership check |
-| `GetRequestByIdQuery` | `DetailDto?` | Full body; IDOR ownership check |
+| `GetRequestByIdQuery` | `DetailDto?` | Full body + `ProcessingTimeMs` + `Note`; IDOR ownership check |
 | `ExportRequestQuery` | `byte[]?` | JSON bytes; IDOR ownership check |
 
 **Pipeline Behaviors (run on every command/query)**
@@ -995,8 +1004,9 @@ dotnet build tests/WebhookService.E2ETests/
 # Step 2: Install Playwright browsers (first run only)
 pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
-# Step 3: Ensure Docker Compose stack is running
-docker compose up -d
+# Step 3: Ensure Docker Compose stack is running (use rebuild script to also wait for health + reload nginx)
+pwsh scripts/rebuild-and-wait.ps1    # Windows
+bash scripts/rebuild-and-wait.sh     # Linux / macOS
 
 # Step 4: Run E2E tests
 $env:E2E_BASE_URL="http://localhost:8088"

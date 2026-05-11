@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-10 | Updated: Redis service + stream-worker + jobs-worker; StackExchange.Redis; AspNetCore.HealthChecks.Redis; WindowsServices; WEBHOOK_WORKER_ID; curl in runtime image -->
+<!-- Generated: 2026-05-11 | Updated: Frontend testing corrected (Vitest not Karma); @vitest/coverage-v8 + jsdom + vitest added; coverageThresholds in angular.json -->
 
 # Dependencies
 
@@ -58,7 +58,10 @@
 - `@angular/build` — esbuild-based builder
 
 ### Testing
-- `Karma` + `Jasmine` — Angular unit tests (`npm test`)
+- `Vitest` ^4.0.8 — unit test runner via `@angular/build:unit-test` (`npm test`)
+- `@vitest/coverage-v8` ^4.1.5 — V8 coverage provider (80% line/branch/function thresholds in `angular.json`)
+- `jsdom` ^28.0.0 — DOM environment for component tests
+- Coverage thresholds: 80% statements/functions/lines, 75% branches (enforced in `angular.json > coverageThresholds`)
 
 ## Infrastructure Services
 
