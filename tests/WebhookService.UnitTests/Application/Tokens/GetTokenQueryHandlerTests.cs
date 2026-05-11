@@ -20,14 +20,12 @@ public sealed class GetTokenQueryHandlerTests
 
     private GetTokenQueryHandler CreateHandler() => new(_repo, _options);
 
-    private static WebhookToken MakeToken(Guid id) => new()
+    private static WebhookToken MakeToken(Guid id)
     {
-        Id = id,
-        Token = Guid.NewGuid(),
-        Description = "test",
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsActive = true
-    };
+        var t = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
+        t.UpdateDescription("test");
+        return t;
+    }
 
     [Fact]
     public async Task Handle_ReturnsDto_WhenTokenExists()

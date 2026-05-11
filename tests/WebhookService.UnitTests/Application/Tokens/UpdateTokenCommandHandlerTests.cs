@@ -22,14 +22,12 @@ public sealed class UpdateTokenCommandHandlerTests
 
     private UpdateTokenCommandHandler CreateHandler() => new(_repo, _options, _tokenCache);
 
-    private static WebhookToken MakeToken(Guid id) => new()
+    private static WebhookToken MakeToken(Guid id)
     {
-        Id = id,
-        Token = Guid.NewGuid(),
-        Description = "original",
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsActive = true
-    };
+        var t = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
+        t.UpdateDescription("original");
+        return t;
+    }
 
     [Fact]
     public async Task Handle_ReturnsUpdatedDto_WhenTokenExists()

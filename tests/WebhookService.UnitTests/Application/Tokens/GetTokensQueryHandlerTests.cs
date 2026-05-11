@@ -25,8 +25,8 @@ public sealed class GetTokensQueryHandlerTests
     {
         var tokens = new List<WebhookToken>
         {
-            new() { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true },
-            new() { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true }
+            new() { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow },
+            new() { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow }
         };
         _repo.GetAllActiveAsync(Arg.Any<CancellationToken>()).Returns(tokens);
 
@@ -51,7 +51,7 @@ public sealed class GetTokensQueryHandlerTests
     {
         var options = Microsoft.Extensions.Options.Options.Create(new WebhookOptions { BaseUrl = "", MaxRequestSizeMb = 5, RetentionDays = 7 });
         var handler = new GetTokensQueryHandler(_repo, options);
-        var token = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
+        var token = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _repo.GetAllActiveAsync(Arg.Any<CancellationToken>()).Returns(new List<WebhookToken> { token });
 
         var result = await handler.Handle(new GetTokensQuery(), CancellationToken.None);

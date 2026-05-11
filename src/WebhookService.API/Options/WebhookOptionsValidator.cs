@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
+using WebhookService.Application.Options;
 
-namespace WebhookService.Application.Options;
+namespace WebhookService.API.Options;
 
 public sealed class WebhookOptionsValidator : IValidateOptions<WebhookOptions>
 {

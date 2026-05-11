@@ -31,7 +31,7 @@ public sealed class DeleteTokenCommandHandlerTests
     public async Task Handle_ReturnsTrue_AndDeactivatesToken()
     {
         var id = Guid.NewGuid();
-        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
+        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         var result = await CreateHandler().Handle(new DeleteTokenCommand(id), CancellationToken.None);
@@ -45,7 +45,7 @@ public sealed class DeleteTokenCommandHandlerTests
     public async Task Handle_NotifiesSseAndClearsCache_OnDelete()
     {
         var id = Guid.NewGuid();
-        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
+        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new DeleteTokenCommand(id), CancellationToken.None);

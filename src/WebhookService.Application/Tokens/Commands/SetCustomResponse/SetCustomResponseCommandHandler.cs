@@ -16,13 +16,13 @@ internal sealed class SetCustomResponseCommandHandler(
         if (token is null)
             return false;
 
-        token.CustomResponse = new CustomResponse
+        token.SetCustomResponse(new CustomResponse
         {
             StatusCode = request.StatusCode,
             ContentType = request.ContentType,
             Body = request.Body,
             Headers = request.Headers
-        };
+        });
 
         await repository.UpdateAsync(token, cancellationToken);
         await tokenCache.RemoveAsync(token.Token, cancellationToken);

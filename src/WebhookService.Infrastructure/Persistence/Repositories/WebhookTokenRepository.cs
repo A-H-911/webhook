@@ -37,9 +37,7 @@ internal sealed class WebhookTokenRepository : IWebhookTokenRepository
         var tracked = await _db.WebhookTokens.FindAsync([token.Id], ct);
         if (tracked is null) return;
 
-        tracked.Description = token.Description;
-        tracked.IsActive = token.IsActive;
-        tracked.CustomResponse = token.CustomResponse;
+        _db.Entry(tracked).CurrentValues.SetValues(token);
 
         await _db.SaveChangesAsync(ct);
     }

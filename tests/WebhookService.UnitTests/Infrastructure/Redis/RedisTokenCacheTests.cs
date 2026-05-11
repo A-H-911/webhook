@@ -22,7 +22,6 @@ public sealed class RedisTokenCacheTests
     {
         Id = Guid.NewGuid(),
         Token = Guid.NewGuid(),
-        IsActive = true,
         CreatedAt = DateTimeOffset.UtcNow
     };
 

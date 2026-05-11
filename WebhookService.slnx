@@ -11,6 +11,7 @@
     <Project Path="tools/RotatePassword/RotatePassword.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WebhookService.ArchitectureTests/WebhookService.ArchitectureTests.csproj" />
     <Project Path="tests/WebhookService.E2ETests/WebhookService.E2ETests.csproj" />
     <Project Path="tests/WebhookService.IntegrationTests/WebhookService.IntegrationTests.csproj" />
     <Project Path="tests/WebhookService.UnitTests/WebhookService.UnitTests.csproj" />

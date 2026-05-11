@@ -29,14 +29,8 @@ public sealed class ResetCustomResponseCommandHandlerTests
     public async Task Handle_ClearsCustomResponse_AndReturnsTrue()
     {
         var id = Guid.NewGuid();
-        var token = new WebhookToken
-        {
-            Id = id,
-            Token = Guid.NewGuid(),
-            CreatedAt = DateTimeOffset.UtcNow,
-            IsActive = true,
-            CustomResponse = new CustomResponse { StatusCode = 201, ContentType = "application/json" }
-        };
+        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
+        token.SetCustomResponse(new CustomResponse { StatusCode = 201, ContentType = "application/json" });
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         var result = await CreateHandler().Handle(new ResetCustomResponseCommand(id), CancellationToken.None);
@@ -50,7 +44,7 @@ public sealed class ResetCustomResponseCommandHandlerTests
     public async Task Handle_RemovesCacheEntry_AfterReset()
     {
         var id = Guid.NewGuid();
-        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, IsActive = true };
+        var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new ResetCustomResponseCommand(id), CancellationToken.None);

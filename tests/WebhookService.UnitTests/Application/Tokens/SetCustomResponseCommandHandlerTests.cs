@@ -18,8 +18,7 @@ public sealed class SetCustomResponseCommandHandlerTests
     {
         Id = id,
         Token = Guid.NewGuid(),
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsActive = true
+        CreatedAt = DateTimeOffset.UtcNow
     };
 
     [Fact]

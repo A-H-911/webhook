@@ -35,6 +35,34 @@ jobs:
           name: unit-test-results
           path: TestResults/
 
+  architecture-test:
+    name: Architecture Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build architecture tests
+        run: dotnet build tests/WebhookService.ArchitectureTests --configuration Release --no-restore
+
+      - name: Run architecture tests
+        run: dotnet test tests/WebhookService.ArchitectureTests --no-build --configuration Release --logger "trx;LogFileName=arch-results.trx" --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-test-results
+          path: TestResults/arch-results.trx
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest

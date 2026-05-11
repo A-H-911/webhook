@@ -76,17 +76,15 @@ public sealed class WebhookControllerTests
     {
         Id = Guid.NewGuid(),
         Token = Guid.NewGuid(),
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsActive = true
+        CreatedAt = DateTimeOffset.UtcNow
     };
 
-    private static WebhookToken MakeInactiveToken() => new()
+    private static WebhookToken MakeInactiveToken()
     {
-        Id = Guid.NewGuid(),
-        Token = Guid.NewGuid(),
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsActive = false
-    };
+        var t = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
+        t.Deactivate();
+        return t;
+    }
 
     // ── Token resolution ──────────────────────────────────────────────────────
 
@@ -182,13 +180,13 @@ public sealed class WebhookControllerTests
     {
         // Arrange
         var token = MakeActiveToken();
-        token.CustomResponse = new CustomResponse
+        token.SetCustomResponse(new CustomResponse
         {
             StatusCode = 201,
             ContentType = "application/json",
             Body = "{\"status\":\"created\"}",
             Headers = "{}"
-        };
+        });
         _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
             .Returns(token);
         var controller = CreateController();
@@ -207,13 +205,13 @@ public sealed class WebhookControllerTests
     {
         // Arrange
         var token = MakeActiveToken();
-        token.CustomResponse = new CustomResponse
+        token.SetCustomResponse(new CustomResponse
         {
             StatusCode = 204,
             ContentType = "text/plain",
             Body = null,
             Headers = "{}"
-        };
+        });
         _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
             .Returns(token);
         var controller = CreateController();

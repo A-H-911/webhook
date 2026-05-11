@@ -19,6 +19,7 @@ using WebhookService.Infrastructure;
 using WebhookService.Infrastructure.Persistence;
 using AuthOptions = WebhookService.API.Options.AuthOptions;
 using AuthOptionsValidator = WebhookService.API.Options.AuthOptionsValidator;
+using WebhookOptionsValidator = WebhookService.API.Options.WebhookOptionsValidator;
 
 var builder = WebApplication.CreateBuilder(args);
 

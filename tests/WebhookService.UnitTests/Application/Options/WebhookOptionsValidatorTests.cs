@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Options;
+using WebhookService.API.Options;
 using WebhookService.Application.Options;
 
 namespace WebhookService.UnitTests.Application.Options;

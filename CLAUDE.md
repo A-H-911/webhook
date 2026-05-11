@@ -21,6 +21,12 @@ dotnet test --filter "FullyQualifiedName~PostToWebhook_Returns200_AndCreatesRequ
 # Run only unit tests (no Docker required)
 dotnet test tests/WebhookService.UnitTests/
 
+# Run architecture tests (no Docker required)
+dotnet test tests/WebhookService.ArchitectureTests/
+# OR via cross-OS scripts:
+#   pwsh scripts/run-arch-tests.ps1      (Windows / Linux / macOS — PowerShell 7+)
+#   bash scripts/run-arch-tests.sh       (Linux / macOS / Git Bash on Windows)
+
 # Run only integration tests (requires Docker — SQL Server container via Testcontainers)
 dotnet test tests/WebhookService.IntegrationTests/
 
@@ -108,6 +114,7 @@ tests/
   WebhookService.UnitTests/       # xUnit — domain entity tests, no infrastructure
   WebhookService.IntegrationTests/# xUnit + Testcontainers.MsSql + WebApplicationFactory
   WebhookService.E2ETests/        # Playwright headless Chromium
+  WebhookService.ArchitectureTests/ # ArchUnitNET + NetArchTest — layer deps, CQRS conventions, no Docker
 docker/
   sqlserver/                      # Custom image: entrypoint.sh polls → runs init.sql
   frontend/                       # Nginx multi-stage Dockerfile + nginx.conf
@@ -243,6 +250,8 @@ public async Task<IActionResult> Archive(Guid id)
 
 **5. If mutating cached token data:** Call `cache.Remove(cmd.TokenId)` in the handler. Skipping this serves stale data for up to 5 minutes.
 
+**6. Architecture tests enforce conventions automatically.** The tests in `tests/WebhookService.ArchitectureTests/` will fail the CI `architecture-test` job if: the command is not a `sealed record`, the handler is not `internal sealed`, the validator does not inherit `AbstractValidator`, or the folder does not match the namespace. Run `dotnet test tests/WebhookService.ArchitectureTests/` locally before pushing.
+
 For queries: implement `IRequest<TResult>` and return `TResult` from the handler. Validators are optional for read-only queries.
 
 ---
@@ -251,6 +260,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 
 | Scenario | Command |
 |----------|---------|
+| Architecture rules (no Docker) | `dotnet test tests/WebhookService.ArchitectureTests/` |
 | Quick smoke — domain logic only | `dotnet test tests/WebhookService.UnitTests/` |
 | Full backend (requires Docker) | `dotnet test` |
 | Single test by name | `dotnet test --filter "FullyQualifiedName~<MethodName>"` |
@@ -285,7 +295,8 @@ Backend coverage thresholds are enforced via `tests/coverlet.runsettings` (80% l
 | **Always** persist WebhookRequest, even from inactive tokens | Callers rely on audit trail; removing persistence breaks compliance logging and makes 410 signal ambiguous. |
 | Receiver uses `GetByTokenIncludingInactiveAsync`, not `GetByTokenAsync` | Dashboard queries filter `IsActive=1` but receiver needs both states. Swapping methods causes inactive tokens to return 404 instead of 410. |
 | `tokenId` parameter in GetRequestById / ExportRequest / DeleteRequest repository methods | C# repository methods always include `tokenId` as a query filter (parameterized EF Core), preventing cross-token access. This is **not** raw SQL `WHERE` enforcement — it is enforced in C# method signatures. Single-admin deployment by design — no per-user tenancy. Removing the `tokenId` filter enables IDOR. |
-| Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph. |
+| Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph and `tests/WebhookService.ArchitectureTests/Layers/LayerDependencyTests.cs`. |
+| Architecture test conventions (CQRS naming, namespace alignment, sealed/internal checks) | If you intentionally need to break a documented convention, update the corresponding rule in `tests/WebhookService.ArchitectureTests/` in the same PR — the test failure is the early-warning system. |
 | `jobs-worker` runs as single replica only | `RetentionCleanupService` has no leader election. Running two replicas double-deletes rows on every 24h tick (benign but wasteful) and risks overlapping range scans causing deadlocks under high write load. Use `deploy.replicas: 1` in compose. |
 | `stream-worker` uses `WEBHOOK_WORKER_ID` env var for consumer name | Docker container IDs change on every `docker run`. If the consumer name changes, the old PEL entries are permanently orphaned in Redis — orphaned messages are never automatically reclaimed. Set `WEBHOOK_WORKER_ID=stream-worker-1` in compose. |
 | Workers poll `CanConnectAsync`, never call `MigrateAsync` | API is the sole migration runner. If workers call `MigrateAsync` concurrently, SQL Server may deadlock schema-lock operations on cold start. Workers wait on DB readiness; migration races are the API's responsibility. |

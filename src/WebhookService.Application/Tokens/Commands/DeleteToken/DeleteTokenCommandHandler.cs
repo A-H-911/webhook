@@ -17,7 +17,7 @@ internal sealed class DeleteTokenCommandHandler(
         if (token is null)
             return false;
 
-        token.IsActive = false;
+        token.Deactivate();
         await repository.UpdateAsync(token, cancellationToken);
         await tokenCache.RemoveAsync(token.Token, cancellationToken);
         sseNotifier.NotifyTokenDeleted(token.Id);

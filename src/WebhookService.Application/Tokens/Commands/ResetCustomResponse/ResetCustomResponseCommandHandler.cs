@@ -14,7 +14,7 @@ internal sealed class ResetCustomResponseCommandHandler(
         var token = await repository.GetByIdAsync(request.Id, cancellationToken);
         if (token is null) return false;
 
-        token.CustomResponse = null;
+        token.ClearCustomResponse();
         await repository.UpdateAsync(token, cancellationToken);
 
         await tokenCache.RemoveAsync(token.Token, cancellationToken);

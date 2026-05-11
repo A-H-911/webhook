@@ -26,7 +26,7 @@ public sealed class WebhookTokenTests
     public void IsActive_CanBeSetToFalse()
     {
         var token = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
-        token.IsActive = false;
+        token.Deactivate();
 
         token.IsActive.Should().BeFalse();
     }
@@ -51,13 +51,8 @@ public sealed class WebhookTokenTests
     public void CustomResponse_CanBeAssigned()
     {
         var response = new CustomResponse { StatusCode = 201, ContentType = "application/json", Body = "{}" };
-        var token = new WebhookToken
-        {
-            Id = Guid.NewGuid(),
-            Token = Guid.NewGuid(),
-            CreatedAt = DateTimeOffset.UtcNow,
-            CustomResponse = response
-        };
+        var token = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
+        token.SetCustomResponse(response);
 
         token.CustomResponse.Should().NotBeNull();
         token.CustomResponse!.StatusCode.Should().Be(201);

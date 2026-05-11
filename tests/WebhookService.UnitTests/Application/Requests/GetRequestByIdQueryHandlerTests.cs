@@ -51,8 +51,9 @@ public sealed class GetRequestByIdQueryHandlerTests
         {
             Id = requestId, TokenId = tokenId, Method = "GET", Path = "/hook",
             ReceivedAt = DateTimeOffset.UtcNow, Headers = "{}", IpAddress = "1.2.3.4",
-            SizeBytes = 0, ProcessingTimeMs = 42
+            SizeBytes = 0
         };
+        request.RecordProcessingTime(42);
         _repo.GetByIdAsync(requestId, Arg.Any<CancellationToken>()).Returns(request);
 
         var result = await CreateHandler().Handle(new GetRequestByIdQuery(tokenId, requestId), CancellationToken.None);
@@ -70,7 +71,7 @@ public sealed class GetRequestByIdQueryHandlerTests
         {
             Id = requestId, TokenId = tokenId, Method = "GET", Path = "/hook",
             ReceivedAt = DateTimeOffset.UtcNow, Headers = "{}", IpAddress = "1.2.3.4",
-            SizeBytes = 0, ProcessingTimeMs = null
+            SizeBytes = 0
         };
         _repo.GetByIdAsync(requestId, Arg.Any<CancellationToken>()).Returns(request);
 

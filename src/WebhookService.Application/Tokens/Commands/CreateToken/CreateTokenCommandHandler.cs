@@ -18,9 +18,9 @@ internal sealed class CreateTokenCommandHandler(
         {
             Id = Guid.NewGuid(),
             Token = Guid.NewGuid(),
-            Description = request.Description,
             CreatedAt = DateTimeOffset.UtcNow
         };
+        token.UpdateDescription(request.Description);
 
         await repository.AddAsync(token, cancellationToken);
         return token.ToDto(options.Value.BaseUrl);

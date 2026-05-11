@@ -19,8 +19,8 @@ internal sealed class UpdateTokenCommandHandler(
         if (token is null)
             return null;
 
-        token.Description = request.Description;
-        token.IsActive = request.IsActive;
+        token.UpdateDescription(request.Description);
+        if (request.IsActive) token.Activate(); else token.Deactivate();
 
         await repository.UpdateAsync(token, cancellationToken);
         await tokenCache.RemoveAsync(token.Token, cancellationToken);

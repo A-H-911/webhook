@@ -15,8 +15,11 @@ public sealed class WebhookRequest
     public string IpAddress { get; init; } = "unknown";
     public string? UserAgent { get; init; }
     public long SizeBytes { get; init; }
-    public long? ProcessingTimeMs { get; set; }
+    public long? ProcessingTimeMs { get; private set; }
     public string? Note { get; init; }
 
     public WebhookToken? Token { get; init; }
+
+    public void RecordProcessingTime(long milliseconds) =>
+        ProcessingTimeMs = Math.Max(0L, milliseconds);
 }

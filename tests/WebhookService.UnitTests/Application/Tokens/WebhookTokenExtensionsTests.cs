@@ -7,23 +7,14 @@ namespace WebhookService.UnitTests.Application.Tokens;
 
 public sealed class WebhookTokenExtensionsTests
 {
-    private static WebhookToken MakeToken(bool withCustomResponse = false) => new()
+    private static WebhookToken MakeToken(bool withCustomResponse = false)
     {
-        Id = Guid.NewGuid(),
-        Token = Guid.NewGuid(),
-        Description = "test token",
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsActive = true,
-        CustomResponse = withCustomResponse
-            ? new CustomResponse
-            {
-                StatusCode = 201,
-                ContentType = "application/json",
-                Body = "{\"ok\":true}",
-                Headers = "{}"
-            }
-            : null
-    };
+        var t = new WebhookToken { Id = Guid.NewGuid(), Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
+        t.UpdateDescription("test token");
+        if (withCustomResponse)
+            t.SetCustomResponse(new CustomResponse { StatusCode = 201, ContentType = "application/json", Body = "{\"ok\":true}", Headers = "{}" });
+        return t;
+    }
 
     [Fact]
     public void ToDto_MapsAllFields_WhenNoCustomResponse()
