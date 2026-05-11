@@ -135,6 +135,10 @@ public sealed class SseNotifierTests
         var (notifier, _) = CreateNotifier();
         var tokenId = Guid.NewGuid();
         using var cts = new CancellationTokenSource();
+        // SemaphoreSlim lets each consumer signal once its channel is registered.
+        // SubscribeAsync registers the channel synchronously inside the lock before
+        // the first await, so calling MoveNextAsync() (without awaiting) is enough.
+        var ready = new SemaphoreSlim(0, 2);
 
         await notifier.TrySubscribeAsync(tokenId);
         await notifier.TrySubscribeAsync(tokenId);
@@ -142,20 +146,28 @@ public sealed class SseNotifierTests
         var received1 = new List<SseEvent>();
         var received2 = new List<SseEvent>();
 
-        var c1 = Task.Run(async () =>
+        async Task ConsumeAsync(List<SseEvent> received)
         {
-            try { await foreach (var evt in notifier.SubscribeAsync(tokenId, cts.Token)) received1.Add(evt); }
+            var e = notifier.SubscribeAsync(tokenId, cts.Token).GetAsyncEnumerator(cts.Token);
+            var firstMove = e.MoveNextAsync(); // runs synchronously through lock → channel registered → suspends
+            ready.Release();
+            try
+            {
+                if (await firstMove) received.Add(e.Current);
+                while (await e.MoveNextAsync()) received.Add(e.Current);
+            }
             catch (OperationCanceledException) { }
-        });
-        var c2 = Task.Run(async () =>
-        {
-            try { await foreach (var evt in notifier.SubscribeAsync(tokenId, cts.Token)) received2.Add(evt); }
-            catch (OperationCanceledException) { }
-        });
+            finally { await e.DisposeAsync(); }
+        }
 
-        await Task.Delay(20);
+        var c1 = Task.Run(() => ConsumeAsync(received1));
+        var c2 = Task.Run(() => ConsumeAsync(received2));
+
+        await ready.WaitAsync();
+        await ready.WaitAsync();
+
         await notifier.NotifyAsync(tokenId, "payload", CancellationToken.None);
-        await Task.Delay(50);
+        await Task.Delay(100);
         await cts.CancelAsync();
         await Task.WhenAll(c1, c2);
 
