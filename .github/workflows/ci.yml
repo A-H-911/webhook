@@ -129,6 +129,9 @@ jobs:
           AUTH_SESSION_HOURS=8
           EOF
           dotnet run --project tools/RotatePassword -- --password "$E2E_AUTH_PASSWORD"
+          # Export to shell env so Docker Compose uses shell precedence over .env file.
+          # BCrypt hashes contain '$' chars that Docker Compose expands when reading .env directly.
+          echo "AUTH_PASSWORD_HASH=$(grep '^AUTH_PASSWORD_HASH=' .env | cut -d= -f2-)" >> "$GITHUB_ENV"
           echo "Generated .env (hash redacted):"
           grep -v '^AUTH_PASSWORD_HASH=' .env
 
