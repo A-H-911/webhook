@@ -47,6 +47,25 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 
 ---
 
+## Recent Changes (as of 2026-05-11 — Test Count Verification)
+
+### Test Suite Accuracy Update (Verified 2026-05-11)
+- **Backend unit:** 310 tests (verified via `dotnet test`)
+- **Backend integration:** 59 tests (verified via `dotnet test`)
+- **Backend E2E:** 48 tests (includes 4 test classes)
+- **Frontend:** 118 tests in 9 spec files, 92.38% stmt / 84.83% branch / 90% fn / 93.51% line coverage
+- **Total backend tests:** 417 (not 373 as previously noted)
+- **All tests green** when infrastructure is available
+
+### Post-2026-05-11 Fixes (No Architectural Changes)
+Commits 3ccc331 → c060ac5 contain test reliability hardening:
+- E2E race condition elimination (SseNotifier multi-subscriber, CustomResponse, Retention)
+- Selector drift fixes (4 failing tests)
+- Nginx readiness check hardening
+- Auth hash environment variable handling in CI
+
+No feature changes, no infrastructure changes, no breaking API changes.
+
 ## Recent Changes (as of 2026-05-11)
 
 ### Backend

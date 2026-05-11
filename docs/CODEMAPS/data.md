@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Updated: ProcessingTimeMs + Note columns in WebhookRequests; covering index IX_WebhookRequests_TokenId_ReceivedAt_Id; 3 new migrations -->
+<!-- Generated: 2026-05-11 | Verified: 5 migrations (InitialCreate through AddRequestNote); ProcessingTimeMs + Note columns in WebhookRequests; covering index IX_WebhookRequests_TokenId_ReceivedAt_Id -->
 
 # Data Architecture
 

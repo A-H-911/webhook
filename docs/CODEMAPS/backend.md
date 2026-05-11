@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Updated: PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery now returns processingTimeMs + note fields -->
+<!-- Generated: 2026-05-11 | Verified: 310 unit + 59 integration tests; PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery returns processingTimeMs + note fields -->
 
 # Backend Architecture
 

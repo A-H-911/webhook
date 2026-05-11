@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Updated: parsedQueryParams/parsedFormValues/threatLinks computed signals; note inline edit UX; processingTimeMs chip; Vitest migration; updateNote service method -->
+<!-- Generated: 2026-05-11 | Verified: 118 tests (92.38% coverage) in 9 spec files; parsedQueryParams/parsedFormValues/threatLinks computed signals; note inline edit UX; processingTimeMs chip; Vitest migration; updateNote service method -->
 
 # Frontend Architecture
 

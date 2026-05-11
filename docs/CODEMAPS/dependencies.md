@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Updated: Frontend testing corrected (Vitest not Karma); @vitest/coverage-v8 + jsdom + vitest added; coverageThresholds in angular.json -->
+<!-- Generated: 2026-05-11 | Verified: Vitest 4.0.8 + @vitest/coverage-v8 4.1.5; jsdom 28.0.0; coverageThresholds enforced in angular.json -->
 
 # Dependencies
 

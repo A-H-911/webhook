@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-10 | Updated: three-process architecture (api + stream-worker + jobs-worker); Redis pub/sub SSE fan-out; DI split; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces -->
+<!-- Generated: 2026-05-11 | Verified: 417 backend tests (310 unit + 59 integration + 48 E2E) + 118 frontend tests; three-process architecture (api + stream-worker + jobs-worker); Redis pub/sub SSE fan-out; DI split; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces -->
 
 # Architecture
 
