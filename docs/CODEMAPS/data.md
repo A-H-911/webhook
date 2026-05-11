@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Verified: 5 migrations (InitialCreate through AddRequestNote); ProcessingTimeMs + Note columns in WebhookRequests; covering index IX_WebhookRequests_TokenId_ReceivedAt_Id -->
+<!-- Generated: 2026-05-11 | Verified: 5 migrations (InitialCreate through AddRequestNote); ProcessingTimeMs + Note columns in WebhookRequests; covering index IX_WebhookRequests_TokenId_ReceivedAt_Id; WebhookTokenRepository.UpdateAsync fix for EF Core owned entities -->
 
 # Data Architecture
 
@@ -55,6 +55,8 @@ WebhookTokens (1) ──< WebhookRequests (many)
 - `CustomResponse` mapped as owned entity (inline columns, no separate table)
 - All reads use `.AsNoTracking()`
 - Migrations: `src/WebhookService.Infrastructure/Migrations/`
+- Entity mutable properties use `private set;` — callers must use mutation methods (`Activate`, `Deactivate`, `UpdateDescription`, `SetCustomResponse`, `ClearCustomResponse`, `RecordProcessingTime`). EF Core reads/writes via reflection — no `PropertyAccessMode` override needed.
+- **⚠ Owned Entity Update Invariant:** `CurrentValues.SetValues(source)` does NOT propagate to `OwnsOne`-mapped entities. After tracking via `FindAsync()`, use the entity's mutation methods to update owned properties. `SetValues()` is unsafe for aggregate roots with owned relationships.
 
 ### Migration History
 | Migration | Date | Change |

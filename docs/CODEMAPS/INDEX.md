@@ -1,6 +1,6 @@
 # Webhook Service — Codemaps Index
 
-**Last Updated:** 2026-05-11 (per-request notes PATCH endpoint; processingTimeMs + note fields; frontend computed signals; Vitest coverage thresholds; CI coverage enforcement + E2E job)
+**Last Updated:** 2026-05-11 (architecture tests suite; domain entity encapsulation; FluentAssertions alignment; WebhookTokenRepository.UpdateAsync fix for EF Core owned entities)
 
 ---
 
@@ -46,6 +46,43 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 3. See **dependencies.md** for all external services
 
 ---
+
+## Recent Changes (as of 2026-05-11 — WebhookTokenRepository.UpdateAsync EF Core Fix)
+
+### Bug Fix: EF Core Owned Entity Persistence
+- **`WebhookTokenRepository.UpdateAsync`** — replaced `CurrentValues.SetValues(token)` with explicit mutation method calls
+- **Root cause:** EF Core's `SetValues()` does not propagate to `OwnsOne`-mapped entities (like `CustomResponse`)
+- **Failing tests:** `SetCustomResponse_Returns204_AndTokenReflectsChange`, `PostToWebhook_WithCustomResponse_ReturnsConfiguredStatus` (both now passing)
+- **Fix:** Direct calls to `tracked.UpdateDescription()`, `tracked.Activate()`, `tracked.SetCustomResponse()`, etc. — matches original pre-refactor approach
+- **Integration tests:** 59/59 passing
+- **Full backend suite:** 442/443 passing (1 pre-existing flaky E2E retention test)
+
+## Recent Changes (as of 2026-05-11 — Architecture Tests + Domain Encapsulation)
+
+### Architecture Tests (commit 9062d68)
+- **`tests/WebhookService.ArchitectureTests/`** — new project, 26 rules, ArchUnitNET 0.13.3 + NetArchTest.eNhancedEdition 1.4.5
+- **Layer dependency tests (8)** — enforce Clean Architecture; fail on any `using WebhookService.Infrastructure` inside Domain etc.
+- **CQRS convention tests (5)** — commands are `sealed record`, handlers are `internal sealed class`, validators inherit `AbstractValidator`
+- **Repository/entity tests (4)** — interfaces in Domain, impls in Infrastructure, entities are sealed + immutable externally
+- **Controller/middleware tests (3)** — public sealed controllers, consistent naming
+- **Test project conventions (3)** — FA version uniformity (`FluentAssertions` 8.9.0 across all 3 test projects)
+- **Folder-namespace tests (3)** — CLR namespace must match source file directory path
+- **`architecture-test` CI job** — parallel (no `needs:`), completes <60s before integration/E2E starts
+- **Scripts** — `scripts/run-arch-tests.ps1` (cross-OS PowerShell 7+) and `scripts/run-arch-tests.sh` (Bash)
+
+### Domain Entity Encapsulation
+- **`WebhookToken`** — `Description`, `IsActive`, `CustomResponse` now `private set;` + methods: `Activate`, `Deactivate`, `UpdateDescription`, `SetCustomResponse`, `ClearCustomResponse`
+- **`WebhookRequest`** — `ProcessingTimeMs` now `private set;` + `RecordProcessingTime(long ms)`
+- All 5 command handlers and test fixtures updated to use new mutation methods
+- EF Core compatibility: reflection-based access, no `PropertyAccessMode` change needed
+
+### WebhookOptionsValidator Namespace Fix
+- Moved from `WebhookService.Application.Options` → `WebhookService.API.Options` (source file is in `src/WebhookService.API/Options/`)
+- `Program.cs` uses alias; `WebhookOptionsValidatorTests.cs` updated with new `using`
+
+### Test Count Update
+- **Backend:** 443 tests (310 unit + 26 arch + 59 integration + 48 E2E) — all green
+- **FluentAssertions** aligned to 8.9.0 across UnitTests + IntegrationTests + E2ETests
 
 ## Recent Changes (as of 2026-05-11 — Test Count Verification)
 

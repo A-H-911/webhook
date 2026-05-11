@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Verified: Vitest 4.0.8 + @vitest/coverage-v8 4.1.5; jsdom 28.0.0; coverageThresholds enforced in angular.json -->
+<!-- Generated: 2026-05-11 | Verified: Vitest 4.0.8 + @vitest/coverage-v8 4.1.5; jsdom 28.0.0; coverageThresholds enforced in angular.json; ArchUnitNET 0.13.3 + NetArchTest.eNhancedEdition 1.4.5 architecture test libs added; FluentAssertions aligned to 8.9.0 across all test projects -->
 
 # Dependencies
 
@@ -36,11 +36,15 @@
 - `Microsoft.AspNetCore.Diagnostics.HealthChecks` — /health/live + /health/ready
 
 ### Testing
-- `xUnit` — test framework (unit + integration + E2E)
+- `xUnit` — test framework (unit + integration + E2E + architecture)
+- `FluentAssertions` 8.9.0 — assertion library (aligned across all 3 test projects: UnitTests, IntegrationTests, E2ETests)
 - `NSubstitute` — mocking (unit tests)
 - `Testcontainers.MsSql` — real SQL Server 2022 in integration tests
 - `Microsoft.AspNetCore.Mvc.Testing` — `WebApplicationFactory<Program>`
 - `Microsoft.Playwright` — headless Chromium E2E tests
+- `TngTech.ArchUnitNET` 0.13.3 — layer dependency rules, CQRS convention rules, sealedness checks (CLR namespace: `ArchUnitNET.*`)
+- `TngTech.ArchUnitNET.xUnit` 0.13.1 — xUnit `.Check()` adapter for ArchUnitNET
+- `NetArchTest.eNhancedEdition` 1.4.5 — folder-to-namespace alignment (`HaveSourceFilePathMatchingNamespace`)
 
 ## Frontend (Angular 21)
 
@@ -86,6 +90,10 @@
 - Output: BCrypt hash (starts with `$2`)
 - Warning: Single-quote the hash in `.env` — `AUTH_PASSWORD_HASH='$2b$12$...'`
   Dollar signs followed by letters (e.g. `$fekMo4`) are interpolated as variables by Docker Compose
+
+### Architecture Test Scripts
+- `scripts/run-arch-tests.ps1` — PowerShell 7+ (cross-OS: Windows, Linux, macOS); runs `dotnet test tests/WebhookService.ArchitectureTests/`
+- `scripts/run-arch-tests.sh` — Bash (Linux, macOS, Git Bash on Windows); same command
 
 ## Key Config / Env
 ```

@@ -65,10 +65,10 @@ dotnet build
 pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
 # Step 3 — run E2E tests (stack must be running; use port 8088 for docker compose)
-E2E_BASE_URL=http://localhost:8088 dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/WebhookService.E2ETests/
 
 # Dev mode: Angular dev server at 4200 + backend at 8080
-E2E_BASE_URL=http://localhost:4200 dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:4200 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/WebhookService.E2ETests/
 ```
 
 ### Docker
@@ -264,7 +264,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Quick smoke — domain logic only | `dotnet test tests/WebhookService.UnitTests/` |
 | Full backend (requires Docker) | `dotnet test` |
 | Single test by name | `dotnet test --filter "FullyQualifiedName~<MethodName>"` |
-| E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/` |
+| E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/WebhookService.E2ETests/` |
 | Angular unit tests | `cd frontend/webhook-spa && npm test` |
 | Angular unit tests with coverage | `cd frontend/webhook-spa && npm test -- --watch=false --coverage` |
 | Rebuild containers + wait healthy | `pwsh scripts/rebuild-and-wait.ps1` (Windows) or `bash scripts/rebuild-and-wait.sh` (Linux/macOS) |

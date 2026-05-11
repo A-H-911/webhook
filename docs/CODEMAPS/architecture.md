@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Verified: 417 backend tests (310 unit + 59 integration + 48 E2E) + 118 frontend tests; three-process architecture (api + stream-worker + jobs-worker); Redis pub/sub SSE fan-out; DI split; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces -->
+<!-- Generated: 2026-05-11 | Verified: 443 backend tests (310 unit + 26 arch + 59 integration + 48 E2E) + 118 frontend tests; three-process architecture (api + stream-worker + jobs-worker); Redis pub/sub SSE fan-out; DI split; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces; ArchUnitNET 0.13.3 architecture test suite added -->
 
 # Architecture
 
@@ -55,6 +55,16 @@ StreamWorker → Infrastructure → Application → Domain
 JobsWorker   → Infrastructure → Application → Domain
 (Domain has zero references to outer layers)
 ```
+
+**Enforced at build time** by `tests/WebhookService.ArchitectureTests/` (26 rules, ArchUnitNET 0.13.3):
+- Layer dependency rules (8 tests) — `LayerDependencyTests.cs`
+- CQRS conventions: sealed records, internal sealed handlers, AbstractValidator validators (5 tests) — `CqrsConventionTests.cs`
+- Repository/entity placement and immutability (4 tests) — `RepositoryEntityConventionTests.cs`
+- Controller/middleware conventions (3 tests) — `ControllerMiddlewareConventionTests.cs`
+- Test project conventions + FluentAssertions version uniformity (3 tests) — `TestProjectConventionTests.cs`
+- Folder-to-namespace alignment (3 tests, NetArchTest.eNhancedEdition 1.4.5) — `FolderNamespaceTests.cs`
+
+CI job: `architecture-test` (no `needs:` — runs in parallel, <60s)
 
 ## DI Extension Map
 | Extension | Registers | Called by |

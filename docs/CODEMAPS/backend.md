@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Verified: 310 unit + 59 integration tests; PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery returns processingTimeMs + note fields -->
+<!-- Generated: 2026-05-11 | Verified: 310 unit + 26 arch + 59 integration tests; PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery returns processingTimeMs + note fields; domain entity encapsulation (private setters + mutation methods); WebhookOptionsValidator moved to WebhookService.API.Options -->
 
 # Backend Architecture
 
@@ -130,6 +130,20 @@ Webhook:MaxRequestSizeMb — Kestrel body size limit (API only)
 Auth:Username / PasswordHash / SessionHours — API only
 WEBHOOK_WORKER_ID        — StreamWorker consumer identity; stable across restarts
 ```
+⚠ `WebhookOptionsValidator` lives in `WebhookService.API.Options` (not Application) — its source file path
+matches `src/WebhookService.API/Options/`. It implements `IValidateOptions<WebhookOptions>` from Application.
+
+## Architecture Tests
+`tests/WebhookService.ArchitectureTests/` — 26 rules enforced at build time:
+```
+Layers/LayerDependencyTests.cs          (8)  — layer isolation, no cycles
+Conventions/CqrsConventionTests.cs      (5)  — sealed record commands, internal sealed handlers, validators
+Conventions/RepositoryEntityConventionTests.cs (4) — repo interfaces in Domain, impls in Infrastructure
+Conventions/ControllerMiddlewareConventionTests.cs (3) — public sealed controllers, middleware shape
+Conventions/TestProjectConventionTests.cs (3) — FA version uniformity, sealed test classes
+Structure/FolderNamespaceTests.cs        (3) — folder path matches CLR namespace
+```
+Run: `dotnet test tests/WebhookService.ArchitectureTests/`  (no Docker, ~1s)
 
 ## Request Note Command
 ```
@@ -140,6 +154,21 @@ PATCH /api/tokens/{tokenId}/requests/{id}/note  [FromBody] { note: string|null }
   Returns 200 OK / 404 Not Found
 ```
 Key files: `src/WebhookService.Application/Requests/Commands/SetRequestNote/`
+
+## Domain Entity Mutation Methods
+`WebhookToken` and `WebhookRequest` use `private set;` on mutable properties — callers use intent-named methods:
+```
+WebhookToken:
+  Activate()                          → IsActive = true
+  Deactivate()                        → IsActive = false
+  UpdateDescription(string)           → Description = value
+  SetCustomResponse(CustomResponse)   → CustomResponse = value
+  ClearCustomResponse()               → CustomResponse = null
+
+WebhookRequest:
+  RecordProcessingTime(long ms)       → ProcessingTimeMs = Math.Max(0, ms)
+```
+EF Core reads/writes `private set;` properties via reflection — no mapping changes required.
 
 ## IDOR Protection
 `GetRequestById`, `ExportRequest`, `DeleteRequest`, `SetRequestNote` all include `WHERE TokenId = @tokenId`

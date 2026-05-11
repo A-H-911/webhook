@@ -1,6 +1,6 @@
 # Contributing Guide
 
-**Last Updated:** 2026-05-11
+**Last Updated:** 2026-05-11 (architecture tests added as fourth test tier)
 
 This guide explains how to set up the development environment, run tests, and submit pull requests to the Webhook Service project.
 
@@ -99,6 +99,24 @@ dotnet format
 ```
 
 Reformats all `.cs` files to project style. Run this before committing.
+
+### Run Architecture Tests (no Docker required)
+
+```bash
+dotnet test tests/WebhookService.ArchitectureTests/
+```
+
+Or use the cross-OS scripts:
+
+```bash
+# PowerShell 7+ (Windows / Linux / macOS)
+pwsh scripts/run-arch-tests.ps1
+
+# Bash (Linux / macOS / Git Bash on Windows)
+bash scripts/run-arch-tests.sh
+```
+
+26 rules verified by assembly reflection — layer dependencies, CQRS naming conventions, entity immutability, repository placement, folder-to-namespace alignment. Takes ~1 second. **No Docker required.** Run this before pushing any structural change.
 
 ### Run Unit Tests (no Docker required)
 
@@ -236,13 +254,29 @@ Or configure your editor to format on save.
 
 ### Testing Strategy
 
-The project uses a **3-tier test pyramid**:
+The project uses a **4-tier test pyramid**:
 
-1. **Unit Tests** (310 backend tests) — Fast, isolated, no infrastructure
-2. **Integration Tests** (59 backend tests) — Real SQL Server container via Testcontainers; WebApplicationFactory
-3. **E2E Tests** (48 tests via Playwright) — Full stack running; user workflows end-to-end
+1. **Architecture Tests** (26 rules) — Assembly reflection; no infrastructure; fastest (~1s)
+2. **Unit Tests** (310 backend tests) — Fast, isolated, no infrastructure (~10s)
+3. **Integration Tests** (59 backend tests) — Real SQL Server container via Testcontainers; WebApplicationFactory (~60s)
+4. **E2E Tests** (48 tests via Playwright) — Full stack running; user workflows end-to-end (~3min)
 
 All tests must pass before submitting a PR.
+
+### Architecture Tests (Fastest — 1 second)
+
+```bash
+dotnet test tests/WebhookService.ArchitectureTests/
+```
+
+**When architecture tests fail:**
+- You added a type to the wrong namespace (e.g., a handler in `API` instead of `Application`)
+- A command is a `class` instead of a `sealed record`
+- A handler is `public` instead of `internal sealed`
+- A source file's folder path doesn't match its CLR namespace
+- `WebhookService.Domain` accidentally references an outer layer
+
+**Intentionally breaking a rule?** Update the corresponding test file in `tests/WebhookService.ArchitectureTests/` in the same PR. The test failure is the early-warning system.
 
 ### Unit Tests (Fast — 10 seconds)
 
@@ -255,7 +289,7 @@ cd frontend/webhook-spa && npm test
 ```
 
 **When to add unit tests:**
-- New domain entity invariants
+- New domain entity invariants or mutation methods
 - CQRS command/query handler logic
 - Service utilities
 - Component creation and template assertions
@@ -314,14 +348,14 @@ All checks run automatically on push and pull request:
 ```bash
 # GitHub Actions workflow — .github/workflows/ci.yml
 
-1. Unit tests (backend) — dotnet test tests/WebhookService.UnitTests/
-2. Integration tests (backend) — dotnet test tests/WebhookService.IntegrationTests/
-3. Frontend tests — npm test with coverage
-4. Frontend build — npm run build
-5. E2E tests — full stack + Playwright
+build-and-test     (parallel) — dotnet test tests/WebhookService.UnitTests/ + build
+architecture-test  (parallel) — dotnet test tests/WebhookService.ArchitectureTests/ [<60s, no Docker]
+frontend           (parallel) — npm run build + npm test --coverage
+integration-test   (after build-and-test) — dotnet test tests/WebhookService.IntegrationTests/
+e2e-test           (after build-and-test + frontend) — full stack + Playwright
 ```
 
-All must pass before merge. Artifact uploads include test results and coverage reports.
+All must pass before merge. Architecture tests run in parallel with unit tests — they'll catch structural violations before the slower integration/E2E jobs even start.
 
 ---
 
@@ -408,6 +442,10 @@ Before submitting a PR, verify:
 
 - [ ] **Build passes:** `dotnet build` succeeds with 0 errors
 - [ ] **Code formatted:** `dotnet format` applied (backend); Prettier run (frontend)
+- [ ] **Architecture tests pass:** No layer violations or CQRS convention breaks
+  ```bash
+  dotnet test tests/WebhookService.ArchitectureTests/
+  ```
 - [ ] **Unit tests added/updated:** All new logic covered; existing tests still pass
   ```bash
   dotnet test tests/WebhookService.UnitTests/
@@ -449,11 +487,13 @@ See CLAUDE.md "Feature Recipe: Adding a CQRS Command" for the full pattern.
 
 **Quick checklist:**
 1. Create `src/WebhookService.Application/<Feature>/Commands/<Name>/`
-2. Add `<Name>Command.cs` (record: `IRequest<T>`)
-3. Add `<Name>CommandHandler.cs` (implements `IRequestHandler`)
-4. Add `<Name>CommandValidator.cs` (extends `AbstractValidator`)
+2. Add `<Name>Command.cs` (`sealed record` implementing `IRequest<T>`)
+3. Add `<Name>CommandHandler.cs` (`internal sealed class` implementing `IRequestHandler`)
+4. Add `<Name>CommandValidator.cs` (`public sealed class` extending `AbstractValidator`)
 5. Add controller action in appropriate controller
 6. Add unit tests in `tests/WebhookService.UnitTests/Application/`
+7. **Verify architecture tests pass:** `dotnet test tests/WebhookService.ArchitectureTests/`
+   - Fails if command is not `sealed record`, handler is not `internal sealed`, validator doesn't extend `AbstractValidator`, or folder/namespace drifts
 
 ### Adding a Query Handler
 
