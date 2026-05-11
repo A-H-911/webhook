@@ -8,7 +8,11 @@ namespace WebhookService.Application.Requests.Queries.ExportRequest;
 internal sealed class ExportRequestQueryHandler(IWebhookRequestRepository repository)
     : IRequestHandler<ExportRequestQuery, byte[]?>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public async Task<byte[]?> Handle(ExportRequestQuery request, CancellationToken cancellationToken)
     {

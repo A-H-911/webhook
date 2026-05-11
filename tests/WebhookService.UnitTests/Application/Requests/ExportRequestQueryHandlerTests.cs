@@ -29,8 +29,8 @@ public sealed class ExportRequestQueryHandlerTests
 
         result.Should().NotBeNull();
         var json = JsonDocument.Parse(result!);
-        json.RootElement.GetProperty("Method").GetString().Should().Be("GET");
-        json.RootElement.GetProperty("Path").GetString().Should().Be("/hooks/abc");
+        json.RootElement.GetProperty("method").GetString().Should().Be("GET");
+        json.RootElement.GetProperty("path").GetString().Should().Be("/hooks/abc");
     }
 
     [Fact]

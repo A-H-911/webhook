@@ -764,7 +764,8 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
             await page.WaitForSelectorAsync("mat-dialog-container", new() { Timeout = 5_000 });
 
             // Change status code to 201
-            await page.Locator("input[type='number']").FillAsync("201");
+            await page.Locator("mat-select").First.ClickAsync();
+            await page.Locator("mat-option").Filter(new() { HasTextString = "201" }).ClickAsync();
 
             // Save
             await page.Locator("mat-dialog-actions button[color='primary']").ClickAsync();
@@ -791,7 +792,7 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
             await page.WaitForSelectorAsync(".sse-dot.connected", new() { Timeout = 10_000 });
 
             // List must be empty before the request
-            await Assertions.Expect(page.Locator(".list-empty")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator(".list-panel .list-empty")).ToBeVisibleAsync();
 
             // Fire a webhook; row must appear via SSE without any page reload
             await Api.PostAsync(path, new StringContent("{}"));
@@ -883,8 +884,8 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
             await confirmClear.WaitForAsync(new() { Timeout = 5_000 });
             await confirmClear.ClickAsync();
 
-            await page.WaitForSelectorAsync(".list-empty", new() { Timeout = 5_000 });
-            await Assertions.Expect(page.Locator(".list-empty")).ToBeVisibleAsync();
+            await page.WaitForSelectorAsync(".list-panel .list-empty", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".list-panel .list-empty")).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }

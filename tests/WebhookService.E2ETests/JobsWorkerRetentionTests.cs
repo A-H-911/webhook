@@ -58,17 +58,22 @@ public sealed class JobsWorkerRetentionTests(DashboardE2EFixture fixture)
         }
         Assert.True(total > 0, "Precondition: StreamWorker must persist the request before testing retention.");
 
-        // Backdate the row to 365 days ago — well past the default 7-day retention window
-        var sql = $"UPDATE WebhookRequests SET ReceivedAt = DATEADD(day, -365, GETUTCDATE()) WHERE TokenId = '{id}'";
+        // Backdate the row to 365 days ago — well past the default 7-day retention window.
+        // RAISERROR fires (and RunSqlCommand throws) if the UPDATE hits anything other than 1 row.
+        var sql = $"DECLARE @r int;" +
+            $"UPDATE WebhookRequests SET ReceivedAt=DATEADD(day,-365,GETUTCDATE()) WHERE TokenId='{id}';" +
+            $"SET @r=@@ROWCOUNT;" +
+            $"IF @r<>1 RAISERROR('Backdate updated %d rows, expected 1',16,1,@r)";
         RunSqlCommand(sql, saPassword);
 
         // Restart jobs-worker — RetentionCleanupService.ExecuteAsync calls RunCleanupAsync
-        // immediately before entering the PeriodicTimer loop, so cleanup runs on startup
+        // immediately before entering the PeriodicTimer loop, so cleanup runs on startup.
+        // Poll /health/ready instead of sleeping: cold-start can exceed 30s on CI runners.
         RunCompose("restart jobs-worker");
-        await Task.Delay(5_000); // allow restart + initial cleanup to complete
+        await WaitForJobsWorkerReadyAsync(timeoutSeconds: 90);
 
         // Poll until the request disappears (jobs-worker deleted it)
-        var cleanDeadline = DateTime.UtcNow.AddSeconds(15);
+        var cleanDeadline = DateTime.UtcNow.AddSeconds(60);
         int remaining = total;
         while (DateTime.UtcNow < cleanDeadline)
         {
@@ -83,6 +88,20 @@ public sealed class JobsWorkerRetentionTests(DashboardE2EFixture fixture)
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private static async Task WaitForJobsWorkerReadyAsync(int timeoutSeconds = 90)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            var exit = RunProcess("docker",
+                "compose exec -T jobs-worker curl -fsS http://localhost:8080/health/ready",
+                out _);
+            if (exit == 0) return;
+            await Task.Delay(2_000);
+        }
+        throw new TimeoutException($"jobs-worker /health/ready not ready within {timeoutSeconds}s");
+    }
 
     private static bool JobsWorkerRunning()
     {
