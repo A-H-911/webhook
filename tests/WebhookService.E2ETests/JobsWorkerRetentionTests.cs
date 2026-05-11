@@ -121,8 +121,10 @@ public sealed class JobsWorkerRetentionTests(DashboardE2EFixture fixture)
 
     private static void RunSqlCommand(string sql, string saPassword)
     {
+        // -d WebhookDb: target the application database (sa default is master)
+        // -b: abort batch and return non-zero exit on any error (makes failures visible)
         var sqlcmdArgs = $"compose exec -T sqlserver " +
-            $"/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"{saPassword}\" -C -Q \"{sql}\"";
+            $"/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"{saPassword}\" -d WebhookDb -C -b -Q \"{sql}\"";
         var exit = RunProcess("docker", sqlcmdArgs, out var stdout);
         if (exit != 0)
             throw new InvalidOperationException($"sqlcmd failed (exit {exit}): {stdout}");
