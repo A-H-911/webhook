@@ -221,6 +221,21 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
         return (id, new Uri(url).AbsolutePath);
     }
 
+    private async Task WaitForRequestsAsync(string tokenId, int expectedCount = 1, int timeoutMs = 10_000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        var delay = 150;
+        while (DateTime.UtcNow < deadline)
+        {
+            var resp = await Api.GetAsync($"/api/tokens/{tokenId}/requests");
+            resp.EnsureSuccessStatusCode();
+            var j = await resp.Content.ReadFromJsonAsync<JsonElement>();
+            if (j.GetProperty("total").GetInt32() >= expectedCount) return;
+            await Task.Delay(delay);
+            delay = Math.Min(delay * 2, 1_000);
+        }
+    }
+
     [Fact]
     public async Task SseDot_BecomesConnected_AfterPageLoad()
     {
@@ -241,6 +256,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
     {
         var (id, path) = await CreateAsync("detail-click");
         await Api.PostAsync(path, new StringContent("{\"test\":1}", Encoding.UTF8, "application/json"));
+        await WaitForRequestsAsync(id);
 
         var page = await NewPageAsync();
         try
@@ -259,6 +275,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
     {
         var (id, path) = await CreateAsync("method-badge");
         await Api.PutAsync(path, new StringContent(""));
+        await WaitForRequestsAsync(id);
 
         var page = await NewPageAsync();
         try
@@ -277,6 +294,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
         var (id, path) = await CreateAsync("detail-body");
         await Api.PostAsync(path,
             new StringContent("{\"key\":\"val\"}", Encoding.UTF8, "application/json"));
+        await WaitForRequestsAsync(id);
 
         var page = await NewPageAsync();
         try
@@ -297,6 +315,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
     {
         var (id, path) = await CreateAsync("del-req");
         await Api.PostAsync(path, new StringContent(""));
+        await WaitForRequestsAsync(id);
 
         var page = await NewPageAsync();
         try
@@ -323,6 +342,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
         var (id, path) = await CreateAsync("clear-all");
         await Api.PostAsync(path, new StringContent(""));
         await Api.PostAsync(path, new StringContent(""));
+        await WaitForRequestsAsync(id, expectedCount: 2);
 
         var page = await NewPageAsync();
         try
