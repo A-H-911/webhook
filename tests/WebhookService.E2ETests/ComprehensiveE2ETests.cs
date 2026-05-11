@@ -765,12 +765,18 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
 
             // Change status code to 201
             await page.Locator("mat-select").First.ClickAsync();
+            // Wait for the CDK overlay panel to open before clicking an option
+            await page.WaitForSelectorAsync("mat-option", new() { Timeout = 3_000 });
             await page.Locator("mat-option").Filter(new() { HasTextString = "201" }).ClickAsync();
 
             // Save
             await page.Locator("mat-dialog-actions button[color='primary']").ClickAsync();
             await page.WaitForSelectorAsync("mat-dialog-container",
                 new() { State = WaitForSelectorState.Hidden, Timeout = 3_000 });
+
+            // Wait for the snackbar — it only fires after the HTTP setCustomResponse call completes.
+            // Without this, the test fires the webhook before the backend has the custom response saved.
+            await page.WaitForSelectorAsync("mat-snack-bar-container", new() { Timeout = 5_000 });
         }
         finally { await page.CloseAsync(); }
 

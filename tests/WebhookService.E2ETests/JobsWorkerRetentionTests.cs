@@ -66,14 +66,15 @@ public sealed class JobsWorkerRetentionTests(DashboardE2EFixture fixture)
             $"IF @r<>1 RAISERROR('Backdate updated %d rows, expected 1',16,1,@r)";
         RunSqlCommand(sql, saPassword);
 
-        // Restart jobs-worker — RetentionCleanupService.ExecuteAsync calls RunCleanupAsync
-        // immediately before entering the PeriodicTimer loop, so cleanup runs on startup.
-        // Poll /health/ready instead of sleeping: cold-start can exceed 30s on CI runners.
-        RunCompose("restart jobs-worker");
-        await WaitForJobsWorkerReadyAsync(timeoutSeconds: 90);
+        // Stop then start jobs-worker — avoids the "restart" race where the old container
+        // is still serving /health/ready while SIGTERM is in flight, causing WaitForJobsWorkerReadyAsync
+        // to return before the new container has actually started and run RetentionCleanupService.
+        RunCompose("stop jobs-worker");
+        RunCompose("start jobs-worker");
+        await WaitForJobsWorkerReadyAsync(timeoutSeconds: 120);
 
         // Poll until the request disappears (jobs-worker deleted it)
-        var cleanDeadline = DateTime.UtcNow.AddSeconds(60);
+        var cleanDeadline = DateTime.UtcNow.AddSeconds(90);
         int remaining = total;
         while (DateTime.UtcNow < cleanDeadline)
         {
