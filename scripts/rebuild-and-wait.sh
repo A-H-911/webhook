@@ -53,6 +53,23 @@ done
 if printf '%s\n' "${SERVICES[@]}" | grep -qxE 'frontend|api'; then
     docker compose exec -T frontend nginx -s reload
     echo "nginx reloaded"
+
+    # Verify nginx is serving on the host-side port before returning
+    echo "Waiting for nginx to serve on http://localhost:8088 ..."
+    deadline=$((SECONDS + TIMEOUT))
+    nginx_ready=0
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if curl -fsS --max-time 3 http://localhost:8088/ >/dev/null 2>&1; then
+            nginx_ready=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$nginx_ready" -eq 0 ]; then
+        echo "ERROR: nginx not serving on port 8088 after ${TIMEOUT}s" >&2
+        exit 1
+    fi
+    echo "nginx is serving"
 fi
 
 echo "All services ready."

@@ -212,8 +212,8 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
         exportResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var content = await exportResponse.Content.ReadAsStringAsync();
-        content.Should().Contain("Method");
-        content.Should().Contain("Path");
+        content.Should().Contain("method");
+        content.Should().Contain("path");
     }
 
     [Fact]
@@ -254,8 +254,8 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
             $"/api/tokens/{tokenId}/requests/{requestId}/export"))
             .Content.ReadAsStringAsync();
 
-        // Exported JSON must preserve sub-second precision on ReceivedAt
-        exportContent.Should().MatchRegex(@"ReceivedAt.*\.\d{3,7}");
+        // Exported JSON must preserve sub-second precision on receivedAt
+        exportContent.Should().MatchRegex(@"receivedAt.*\.\d{3,7}");
     }
 
     [Fact]
