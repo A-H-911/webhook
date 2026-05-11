@@ -9,9 +9,9 @@ Full-stack monorepo — .NET 10 Clean Architecture + Angular 21 SPA + SQL Server
 
 | Unit | Role |
 |------|------|
-| `WebhookService.API` | HTTP endpoints, SSE fan-out (cookie auth, rate limiting, antiforgery) |
-| `WebhookService.StreamWorker` | Drains `webhook-requests` Redis stream → persists to SQL → publishes `sse:{tokenId}` |
-| `WebhookService.JobsWorker` | Retention cleanup (24h PeriodicTimer); single replica only |
+| `Hookbin.API` | HTTP endpoints, SSE fan-out (cookie auth, rate limiting, antiforgery) |
+| `Hookbin.StreamWorker` | Drains `webhook-requests` Redis stream → persists to SQL → publishes `sse:{tokenId}` |
+| `Hookbin.JobsWorker` | Retention cleanup (24h PeriodicTimer); single replica only |
 
 ## System Diagram
 ```
@@ -22,7 +22,7 @@ Nginx :8088
   │  /api/* /webhook/* /health → api:8080
   │  / → static Angular bundle
   ▼
-WebhookService.API :8080
+Hookbin.API :8080
   │  ForwardedHeaders → GlobalExceptionMiddleware → RateLimiter → Auth → Antiforgery
   │
   ├── POST /webhook/{guid} → IRequestQueuePublisher → XADD webhook-requests stream
@@ -36,11 +36,11 @@ Redis
   ├── Stream:  webhook-requests (XREADGROUP → StreamWorker)
   └── Pub/sub: sse:{tokenId}   (PUBLISH → API's RedisSseBridgeService → SseNotifier)
 
-WebhookService.StreamWorker
+Hookbin.StreamWorker
   ├── RedisStreamConsumerService: XREADGROUP → persist to SQL → PUBLISH sse:{tokenId}
-  └── Consumer name: WEBHOOK_WORKER_ID env var, fallback: "consumer-{MachineName}"
+  └── Consumer name: HOOKBIN_WORKER_ID env var, fallback: "consumer-{MachineName}"
 
-WebhookService.JobsWorker
+Hookbin.JobsWorker
   └── RetentionCleanupService: PeriodicTimer (24h) → DELETE old WebhookRequests (batched 5k/loop)
 
 SQL Server: WebhookTokens, WebhookRequests (shared by all three units)
@@ -56,7 +56,7 @@ JobsWorker   → Infrastructure → Application → Domain
 (Domain has zero references to outer layers)
 ```
 
-**Enforced at build time** by `tests/WebhookService.ArchitectureTests/` (26 rules, ArchUnitNET 0.13.3):
+**Enforced at build time** by `tests/Hookbin.ArchitectureTests/` (26 rules, ArchUnitNET 0.13.3):
 - Layer dependency rules (8 tests) — `LayerDependencyTests.cs`
 - CQRS conventions: sealed records, internal sealed handlers, AbstractValidator validators (5 tests) — `CqrsConventionTests.cs`
 - Repository/entity placement and immutability (4 tests) — `RepositoryEntityConventionTests.cs`
@@ -119,7 +119,7 @@ Fan-out path: PUBLISH sse:{tokenId} → RedisSseBridgeService → SseNotifier.No
 ## Resilience
 - EF Core retry: `EnableRetryOnFailure(3, 2s)`
 - Worker DB readiness: Polly retry (30×, exponential up to 30s) via `CanConnectAsync`
-- StreamWorker consumer name stable across restarts via `WEBHOOK_WORKER_ID` env var
+- StreamWorker consumer name stable across restarts via `HOOKBIN_WORKER_ID` env var
 - PEL recovery: `XREADGROUP "0-0"` drains unACKed messages from previous consumer run
 
 ## Rate Limiting & Security
@@ -130,9 +130,9 @@ Fan-out path: PUBLISH sse:{tokenId} → RedisSseBridgeService → SseNotifier.No
 - **SSE subscriber cap:** Max 10 concurrent connections per token
 
 ## Deployment Notes
-**WEBHOOK_BASE_URL precedence** (highest → lowest):
-1. `docker-compose.override.yml` → `Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"`
-2. `docker-compose.yml` → `Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"`
+**HOOKBIN_BASE_URL precedence** (highest → lowest):
+1. `docker-compose.override.yml` → `Hookbin__BaseUrl: "${HOOKBIN_BASE_URL}"`
+2. `docker-compose.yml` → `Hookbin__BaseUrl: "${HOOKBIN_BASE_URL}"`
 3. `appsettings.Development.json` → `http://localhost:8080`
 4. `appsettings.json` → `""` (empty — startup validator fires if unset)
 

@@ -2,10 +2,10 @@
 #
 # Required in .env:
 #   NGROK_AUTHTOKEN=<your_token>
-#   WEBHOOK_BASE_URL=https://twk-webhook-unifonic.ngrok.app
+#   HOOKBIN_BASE_URL=https://twk-webhook-unifonic.ngrok.app
 #
-# WEBHOOK_BASE_URL is set in .env and flows to the api service through the existing
-# Webhook__BaseUrl binding in docker-compose.yml — no override is needed in this file.
+# HOOKBIN_BASE_URL is set in .env and flows to the api service through the existing
+# Hookbin__BaseUrl binding in docker-compose.yml — no override is needed in this file.
 
 services:
   ngrok:
@@ -19,10 +19,10 @@ services:
     depends_on:
       - frontend
     networks:
-      - webhook-net
+      - hookbin-net
     ports:
       - "127.0.0.1:4041:4040"
     restart: unless-stopped
 
 networks:
-  webhook-net:
+  hookbin-net:

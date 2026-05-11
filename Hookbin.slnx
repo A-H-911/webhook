@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hookbin.API/Hookbin.API.csproj" />
+    <Project Path="src/Hookbin.Application/Hookbin.Application.csproj" />
+    <Project Path="src/Hookbin.Domain/Hookbin.Domain.csproj" />
+    <Project Path="src/Hookbin.Infrastructure/Hookbin.Infrastructure.csproj" />
+    <Project Path="src/Hookbin.StreamWorker/Hookbin.StreamWorker.csproj" />
+    <Project Path="src/Hookbin.JobsWorker/Hookbin.JobsWorker.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/RotatePassword/RotatePassword.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hookbin.ArchitectureTests/Hookbin.ArchitectureTests.csproj" />
+    <Project Path="tests/Hookbin.E2ETests/Hookbin.E2ETests.csproj" />
+    <Project Path="tests/Hookbin.IntegrationTests/Hookbin.IntegrationTests.csproj" />
+    <Project Path="tests/Hookbin.UnitTests/Hookbin.UnitTests.csproj" />
+  </Folder>
+</Solution>

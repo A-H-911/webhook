@@ -54,7 +54,7 @@ WebhookTokens (1) ──< WebhookRequests (many)
 ## EF Core Notes
 - `CustomResponse` mapped as owned entity (inline columns, no separate table)
 - All reads use `.AsNoTracking()`
-- Migrations: `src/WebhookService.Infrastructure/Migrations/`
+- Migrations: `src/Hookbin.Infrastructure/Migrations/`
 - Entity mutable properties use `private set;` — callers must use mutation methods (`Activate`, `Deactivate`, `UpdateDescription`, `SetCustomResponse`, `ClearCustomResponse`, `RecordProcessingTime`). EF Core reads/writes via reflection — no `PropertyAccessMode` override needed.
 - **⚠ Owned Entity Update Invariant:** `CurrentValues.SetValues(source)` does NOT propagate to `OwnsOne`-mapped entities. After tracking via `FindAsync()`, use the entity's mutation methods to update owned properties. `SetValues()` is unsafe for aggregate roots with owned relationships.
 
@@ -68,7 +68,7 @@ WebhookTokens (1) ──< WebhookRequests (many)
 | `20260510104653_AddRequestNote` | 2026-05-10 | `Note NVARCHAR(2000) NULL` column |
 
 ## Retention (Updated 2026-05-10)
-`RetentionCleanupService` runs in the **`WebhookService.JobsWorker`** process (not the API).
+`RetentionCleanupService` runs in the **`Hookbin.JobsWorker`** process (not the API).
 Deletes requests older than `Webhook:RetentionDays` on a 24-hour `PeriodicTimer`.
 Cleanup is batched: delete 5k rows per loop iteration (prevents timeout on large datasets).
 Inactive tokens' requests are retained for audit trail.
@@ -93,7 +93,7 @@ Stream key: webhook-requests
 Consumer group: webhook-api
 Entry fields:
   payload  — JSON-serialized WebhookRequest (method, path, queryString, headers, body, ipAddress, tokenId, receivedAt)
-Consumer name: WEBHOOK_WORKER_ID env var, fallback "consumer-{MachineName}"
+Consumer name: HOOKBIN_WORKER_ID env var, fallback "consumer-{MachineName}"
 PEL recovery: XREADGROUP "0-0" drains unACKed entries from previous run on startup
 ```
 

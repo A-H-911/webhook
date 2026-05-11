@@ -1,4 +1,4 @@
-# Webhook Service
+# Hookbin
 
 A self-hosted webhook inspection and debugging tool. Generate unique URLs, send HTTP requests to them from any source, and inspect every captured request in real time — similar to webhook.site but running entirely on your own infrastructure.
 
@@ -108,12 +108,12 @@ Edit `.env`:
 
 ```env
 SA_PASSWORD=YourStr0ngP@ssword!
-WEBHOOK_BASE_URL=http://your-server-hostname-or-ip:8088
+HOOKBIN_BASE_URL=http://your-server-hostname-or-ip:8088
 RETENTION_DAYS=7
 MAX_REQUEST_SIZE_MB=5
 ```
 
-> `WEBHOOK_BASE_URL` is the address that **external callers** can reach — not the internal container name. For a LAN deployment use `http://192.168.1.10:8088`. The application refuses to start if this value is absent or empty.
+> `HOOKBIN_BASE_URL` is the address that **external callers** can reach — not the internal container name. For a LAN deployment use `http://192.168.1.10:8088`. The application refuses to start if this value is absent or empty.
 
 ### 2. Start the stack
 
@@ -156,7 +156,7 @@ docker compose down -v     # wipes all data
 External callers ──────────────────► ANY /webhook/{uuid}
   (real IP forwarded via X-Forwarded-For)         │
                                ┌──────────────────▼─────────────────────────┐
-                               │    WebhookService.API  (:8080)              │
+                               │    Hookbin.API  (:8080)              │
                                │  UseForwardedHeaders() → real IP captured   │
                                │  Token CRUD · SSE stream · Webhook receiver │
                                │  XADD → webhook-requests stream (Redis)     │
@@ -166,7 +166,7 @@ External callers ──────────────────► ANY /
           ┌───────────────────────────┼──────────────────────────────┐
           ▼                           ▼                               ▼
 ┌─────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────┐
-│  WebhookService     │   │  WebhookService          │   │  sqlserver          │
+│  Hookbin     │   │  Hookbin          │   │  sqlserver          │
 │  .StreamWorker      │   │  .JobsWorker             │   │  WebhookDb          │
 │  XREADGROUP →       │   │  RetentionCleanupService │   │  (tokens, requests) │
 │  SQL INSERT →       │   │  PeriodicTimer (24h)     │   └─────────────────────┘
@@ -295,7 +295,7 @@ User deletes token
 ### Flow E — Retention Cleanup
 
 ```
-RetentionCleanupService (in WebhookService.JobsWorker process — NOT the API)
+RetentionCleanupService (in Hookbin.JobsWorker process — NOT the API)
   → PeriodicTimer(24h) — first tick is 24h after startup
   → Creates a new IServiceScope per tick (avoids captive DbContext dependency)
   → if (RetentionDays <= 0) skip — keep forever
@@ -392,7 +392,7 @@ RetentionCleanupService (in WebhookService.JobsWorker process — NOT the API)
 |--------|------|--------------|----------|-------|
 | `GET` | `/api/tokens` | — | `200 WebhookTokenDto[]` | Active tokens only |
 | `GET` | `/api/tokens/{id}` | — | `200 WebhookTokenDto` / `404` | |
-| `POST` | `/api/tokens` | `{ description?: string }` | `201 WebhookTokenDto` | `webhookUrl` uses `WEBHOOK_BASE_URL` |
+| `POST` | `/api/tokens` | `{ description?: string }` | `201 WebhookTokenDto` | `webhookUrl` uses `HOOKBIN_BASE_URL` |
 | `PUT` | `/api/tokens/{id}` | `{ description?: string, isActive: bool }` | `200 WebhookTokenDto` / `404` | Update description or reactivate |
 | `DELETE` | `/api/tokens/{id}` | — | `204` / `404` | Soft-delete + hard-delete all requests |
 | `PUT` | `/api/tokens/{id}/custom-response` | `{ statusCode, contentType, body?, headers }` | `204` / `404` | `headers` is a raw JSON string |
@@ -559,10 +559,10 @@ Validated at startup via `IValidateOptions<WebhookOptions>` with `.ValidateOnSta
 ## 8. Solution Structure
 
 ```
-WebhookService.sln
+Hookbin.sln
 │
 ├── src/
-│   ├── WebhookService.Domain/
+│   ├── Hookbin.Domain/
 │   │   ├── Entities/
 │   │   │   ├── WebhookToken.cs
 │   │   │   └── WebhookRequest.cs
@@ -576,7 +576,7 @@ WebhookService.sln
 │   │       ├── IRequestQueuePublisher.cs        ← decouples receiver from Redis XADD
 │   │       └── SseEvent.cs                     ← record SseEvent(string EventName, string Data)
 │   │
-│   ├── WebhookService.Application/
+│   ├── Hookbin.Application/
 │   │   ├── Caching/
 │   │   │   └── ITokenCache.cs                  ← IMemoryCache abstraction (5-min sliding)
 │   │   ├── Tokens/Commands/
@@ -609,7 +609,7 @@ WebhookService.sln
 │   │   │   └── WebhookOptionsValidator.cs      ← IValidateOptions; ValidateOnStart
 │   │   └── DependencyInjection.cs
 │   │
-│   ├── WebhookService.Infrastructure/
+│   ├── Hookbin.Infrastructure/
 │   │   ├── Persistence/
 │   │   │   ├── ApplicationDbContext.cs
 │   │   │   ├── Configurations/
@@ -631,7 +631,7 @@ WebhookService.sln
 │   │   │   └── SseNotifier.cs                  ← ConcurrentDictionary; max 10/token; bounded channels
 │   │   └── DependencyInjection.cs              ← AddCoreInfrastructure / AddApiInfrastructure / AddStreamWorkerInfrastructure / AddJobsWorkerInfrastructure
 │   │
-│   ├── WebhookService.API/
+│   ├── Hookbin.API/
 │   │   ├── Controllers/
 │   │   │   ├── TokensController.cs
 │   │   │   ├── RequestsController.cs
@@ -645,21 +645,21 @@ WebhookService.sln
 │   │   │   └── RedisSessionRevocationStore.cs
 │   │   └── Program.cs                          ← AddCoreInfrastructure + AddApiInfrastructure; ForwardedHeaders; Kestrel; CORS; Polly migrations
 │   │
-│   ├── WebhookService.StreamWorker/
+│   ├── Hookbin.StreamWorker/
 │   │   └── Program.cs                          ← AddCoreInfrastructure + AddStreamWorkerInfrastructure; Polly DB wait; /health/live + /health/ready
 │   │
-│   └── WebhookService.JobsWorker/
+│   └── Hookbin.JobsWorker/
 │       └── Program.cs                          ← AddCoreInfrastructure + AddJobsWorkerInfrastructure; Polly DB wait; SQL-only /health/ready
 │
 ├── tests/
-│   ├── WebhookService.UnitTests/
-│   ├── WebhookService.IntegrationTests/
-│   └── WebhookService.E2ETests/
+│   ├── Hookbin.UnitTests/
+│   ├── Hookbin.IntegrationTests/
+│   └── Hookbin.E2ETests/
 │       └── Fixtures/
 │           └── DockerComposeFixture.cs         ← GlobalSetup/Teardown; waits for health checks
 │
 ├── frontend/
-│   └── webhook-spa/src/app/
+│   └── hookbin-spa/src/app/
 │       ├── services/
 │       │   └── theme.service.ts         ← dark/light toggle; localStorage persistence; Angular signals
 │       ├── core/
@@ -687,7 +687,7 @@ WebhookService.sln
 │
 ├── Dockerfile                           ← API: multi-stage .NET SDK → ASP.NET 10 runtime
 ├── docker-compose.yml
-├── docker-compose.override.yml          ← local dev: CORS for :4200, BaseUrl from ${WEBHOOK_BASE_URL}
+├── docker-compose.override.yml          ← local dev: CORS for :4200, BaseUrl from ${HOOKBIN_BASE_URL}
 └── .env.example
 ```
 
@@ -704,9 +704,9 @@ WebhookService.sln
 | `sqlserver` | Custom (`docker/sqlserver/Dockerfile`) | `1433` | WebhookDb (SQL Server 2022 Developer) |
 | `redis` | `redis:7-alpine` | `127.0.0.1:6379` (localhost-only) | Webhook stream + SSE pub/sub + token cache |
 | `seq` | `datalust/seq:latest` | `127.0.0.1:5341` (ingest), `127.0.0.1:5342` (UI) | Structured logs — **localhost-only** |
-| `api` | `./Dockerfile` `PROJECT_NAME=WebhookService.API` | `8080` | ASP.NET Core API; migration runner; SSE fan-out |
-| `stream-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.StreamWorker` | none | Redis stream consumer → SQL persist → SSE publish |
-| `jobs-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.JobsWorker` | none | Retention cleanup — **single replica only** |
+| `api` | `./Dockerfile` `PROJECT_NAME=Hookbin.API` | `8080` | ASP.NET Core API; migration runner; SSE fan-out |
+| `stream-worker` | `./Dockerfile` `PROJECT_NAME=Hookbin.StreamWorker` | none | Redis stream consumer → SQL persist → SSE publish |
+| `jobs-worker` | `./Dockerfile` `PROJECT_NAME=Hookbin.JobsWorker` | none | Retention cleanup — **single replica only** |
 | `frontend` | Custom (`docker/frontend/Dockerfile`) | `8088` | Nginx — Angular SPA + reverse proxy |
 
 > SEQ and Redis ports are bound to `127.0.0.1` and are inaccessible from external hosts by design.
@@ -759,7 +759,7 @@ Expose the stack publicly without port-forwarding:
 ```bash
 # Add to .env:
 # NGROK_AUTHTOKEN=<your_ngrok_token>
-# WEBHOOK_BASE_URL=https://<your-ngrok-domain>
+# HOOKBIN_BASE_URL=https://<your-ngrok-domain>
 
 docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
 ```
@@ -774,7 +774,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: "Development"
       Cors__AllowedOrigins:   "http://localhost:4200"
-      Webhook__BaseUrl:       "${WEBHOOK_BASE_URL}"   # reads from .env — supports both local and ngrok
+      Hookbin__BaseUrl:       "${HOOKBIN_BASE_URL}"   # reads from .env — supports both local and ngrok
   sqlserver:
     ports:
       - "1433:1433"
@@ -782,7 +782,7 @@ services:
 
 Use with: `docker compose -f docker-compose.yml -f docker-compose.override.yml up -d`
 
-> **Note:** After changing `WEBHOOK_BASE_URL` in `.env`, run `docker compose up -d --force-recreate api` to pick up the new value. `docker compose up -d` alone will not recreate a running container.
+> **Note:** After changing `HOOKBIN_BASE_URL` in `.env`, run `docker compose up -d --force-recreate api` to pick up the new value. `docker compose up -d` alone will not recreate a running container.
 
 ---
 
@@ -793,7 +793,7 @@ All configuration is via environment variables.
 | Variable | Required | Default | Valid Range | Description |
 |----------|----------|---------|-------------|-------------|
 | `SA_PASSWORD` | **Yes** | — | Strong password | SQL Server SA password |
-| `WEBHOOK_BASE_URL` | **Yes** | — | Any non-empty URL | Base URL for generated webhook URLs (e.g. `http://192.168.1.10:8088`) |
+| `HOOKBIN_BASE_URL` | **Yes** | — | Any non-empty URL | Base URL for generated webhook URLs (e.g. `http://192.168.1.10:8088`) |
 | `AUTH_USERNAME` | **Yes** | — | Any non-empty string | Admin login username |
 | `AUTH_PASSWORD_HASH` | **Yes** | — | BCrypt hash (`$2...`) | BCrypt hash of the admin password — never store plaintext |
 | `RETENTION_DAYS` | No | `7` | 0–365 | Days to keep requests; `0` = keep forever |
@@ -802,7 +802,7 @@ All configuration is via environment variables.
 | `WEBHOOK__ReceiverRateLimitPerSecond` | No | `250` | 1–10000 | Max requests per second per token on the webhook receiver; uses token-bucket algorithm |
 | `Cors__AllowedOrigins` | No | `""` | Comma-separated origins | Leave empty in production (Nginx proxies all traffic) |
 | `NGROK_AUTHTOKEN` | No | — | ngrok auth token | Required only when using `docker-compose.ngrok.yml` |
-| `WEBHOOK_WORKER_ID` | No | `consumer-{MachineName}` | Any stable string | Redis consumer group identity for `stream-worker`; **must be stable across restarts** to prevent PEL orphaning. Compose default: `stream-worker-1` |
+| `HOOKBIN_WORKER_ID` | No | `consumer-{MachineName}` | Any stable string | Redis consumer group identity for `stream-worker`; **must be stable across restarts** to prevent PEL orphaning. Compose default: `stream-worker-1` |
 | `ConnectionStrings__Redis` | Yes (stream-worker) | — | `host:port` | Redis connection string for stream, pub/sub, and token cache (e.g. `redis:6379`) |
 
 > **`.env` quoting rule for `AUTH_PASSWORD_HASH`:** BCrypt hashes contain `$` followed by letters (e.g. `$b`, `$f`). Docker Compose interpolates `$letter...` sequences as variable names, silently corrupting the hash. Always single-quote the value in `.env`:
@@ -828,7 +828,7 @@ python3 -c "import bcrypt; print(bcrypt.hashpw(b'YourStr0ngP@ss!', bcrypt.gensal
 node -e "const b=require('bcryptjs'); console.log(b.hashSync('YourStr0ngP@ss!',12))"
 ```
 
-**Startup validation:** The API process exits immediately at startup if `WEBHOOK_BASE_URL`, `AUTH_USERNAME`, or `AUTH_PASSWORD_HASH` are missing/invalid, or if `MAX_REQUEST_SIZE_MB`, `RETENTION_DAYS`, or `AUTH_SESSION_HOURS` are outside their valid ranges. Silent misconfiguration is worse than a fast failure.
+**Startup validation:** The API process exits immediately at startup if `HOOKBIN_BASE_URL`, `AUTH_USERNAME`, or `AUTH_PASSWORD_HASH` are missing/invalid, or if `MAX_REQUEST_SIZE_MB`, `RETENTION_DAYS`, or `AUTH_SESSION_HOURS` are outside their valid ranges. Silent misconfiguration is worse than a fast failure.
 
 ---
 
@@ -902,23 +902,23 @@ dotnet build
 dotnet format
 
 # Run unit tests only (no Docker needed)
-dotnet test tests/WebhookService.UnitTests/
+dotnet test tests/Hookbin.UnitTests/
 
 # Run the API (configure appsettings.Development.json first)
-dotnet run --project src/WebhookService.API
+dotnet run --project src/Hookbin.API
 ```
 
 ### Add an EF Core Migration
 
 ```bash
 dotnet ef migrations add <MigrationName> \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 
 # Apply to local database
 dotnet ef database update \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 ```
 
 In production (Docker), migrations are applied automatically at startup via Polly retry (5 attempts, exponential backoff, skips `OperationCanceledException`).
@@ -928,7 +928,7 @@ In production (Docker), migrations are applied automatically at startup via Poll
 **Requirements:** Node.js 20+
 
 ```bash
-cd frontend/webhook-spa
+cd frontend/hookbin-spa
 
 npm install
 
@@ -951,7 +951,7 @@ The `proxy.conf.json` forwards to `http://localhost:8080` automatically. The .NE
 docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
 
 # Run Angular dev server (SSE connects through proxy.conf.json → API at :8080)
-cd frontend/webhook-spa && npm start
+cd frontend/hookbin-spa && npm start
 ```
 
 ### Upgrading an Existing Deployment
@@ -971,7 +971,7 @@ EF migrations run automatically at API startup — no manual DB steps. Data volu
 ### Unit Tests — No Dependencies
 
 ```bash
-dotnet test tests/WebhookService.UnitTests/
+dotnet test tests/Hookbin.UnitTests/
 ```
 
 Covers domain entity invariants, CQRS handler logic, SSE notifier behaviour (11th connection throws, `token-deleted` completes channels), and `RetentionCleanupService` (DB errors do not stop the timer).
@@ -981,7 +981,7 @@ Covers domain entity invariants, CQRS handler logic, SSE notifier behaviour (11t
 Testcontainers pulls `mcr.microsoft.com/mssql/server:2022-latest` automatically. Docker must be running.
 
 ```bash
-dotnet test tests/WebhookService.IntegrationTests/
+dotnet test tests/Hookbin.IntegrationTests/
 ```
 
 Covers all API endpoints, pagination, LIKE search, IDOR ownership checks, chunked body capture, SSE limits, and health checks. Uses `WebApplicationFactory<Program>` + real SQL Server container. SSE is stubbed with `TestNullSseNotifier` — the real in-process notifier is not suited for isolated test assertions because it requires live SSE subscribers.
@@ -989,7 +989,7 @@ Covers all API endpoints, pagination, LIKE search, IDOR ownership checks, chunke
 ### Angular Unit Tests — No Dependencies
 
 ```bash
-cd frontend/webhook-spa
+cd frontend/hookbin-spa
 npm test
 ```
 
@@ -999,10 +999,10 @@ Runs with **Vitest** via `@angular/build:unit-test`. Covers Angular component cr
 
 ```bash
 # Step 1: Build (required — playwright.ps1 only exists after build)
-dotnet build tests/WebhookService.E2ETests/
+dotnet build tests/Hookbin.E2ETests/
 
 # Step 2: Install Playwright browsers (first run only)
-pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
+pwsh tests/Hookbin.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
 # Step 3: Ensure Docker Compose stack is running (use rebuild script to also wait for health + reload nginx)
 pwsh scripts/rebuild-and-wait.ps1    # Windows
@@ -1011,7 +1011,7 @@ bash scripts/rebuild-and-wait.sh     # Linux / macOS
 # Step 4: Run E2E tests
 $env:E2E_BASE_URL="http://localhost:8088"
 $env:E2E_AUTH_PASSWORD="admin"  # Must match AUTH_PASSWORD (plaintext) in .env
-dotnet test tests/WebhookService.E2ETests/
+dotnet test tests/Hookbin.E2ETests/
 ```
 
 Covers: dashboard load, token creation, real-time SSE appearance, SSE status indicator, custom response configuration, request export, and token deletion with navigation.
@@ -1075,19 +1075,19 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 
 ### Adding a New CQRS Command
 
-1. Create `src/WebhookService.Application/<Feature>/Commands/<Name>/`
+1. Create `src/Hookbin.Application/<Feature>/Commands/<Name>/`
 2. Add `<Name>Command.cs` (record implementing `IRequest<T>`)
 3. Add `<Name>CommandHandler.cs` (implementing `IRequestHandler`)
 4. Add `<Name>CommandValidator.cs` (`AbstractValidator<T>`)
 5. Add a controller action — MediatR auto-discovers handlers via assembly scanning
-6. Add unit tests in `tests/WebhookService.UnitTests/Application/`
+6. Add unit tests in `tests/Hookbin.UnitTests/Application/`
 
 ### Adding a New EF Core Migration
 
 ```bash
 dotnet ef migrations add <Name> \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 ```
 
 Review the generated migration before committing. Destructive changes (column drops, renames) need manual data safety review.
@@ -1096,7 +1096,7 @@ Review the generated migration before committing. Destructive changes (column dr
 
 - [ ] `dotnet build` passes with 0 errors
 - [ ] `dotnet format` applied
-- [ ] Unit tests added/updated and passing (`dotnet test` for backend, `npm test` in `frontend/webhook-spa` for Angular)
+- [ ] Unit tests added/updated and passing (`dotnet test` for backend, `npm test` in `frontend/hookbin-spa` for Angular)
 - [ ] If touching API contract: §7.3 table updated
 - [ ] If adding an env var: §10 Configuration Reference updated
 - [ ] If changing SSE wire name or `headers` contract type: §7.3 and §16 PA2 note updated
@@ -1169,7 +1169,7 @@ Review the generated migration before committing. Destructive changes (column dr
 | H5 | CORS not configured for Angular dev server | CORS from `Cors__AllowedOrigins` env var; override adds `:4200` |
 | HN1 | `"".Split(',')` produces `[""]` — empty string added as CORS origin | `StringSplitOptions.RemoveEmptyEntries | TrimEntries` |
 | HN2 | API container port was image-version-dependent | `ASPNETCORE_HTTP_PORTS: "8080"` explicit in docker-compose |
-| HN3 | `proxy_set_header Host` missing — generated URLs showed `http://api:8080/...` | Nginx passes `Host $host`; `WEBHOOK_BASE_URL` required at startup |
+| HN3 | `proxy_set_header Host` missing — generated URLs showed `http://api:8080/...` | Nginx passes `Host $host`; `HOOKBIN_BASE_URL` required at startup |
 | HN4 | SSE connection count check was TOCTOU race | Per-tokenId lock; check + increment in one critical section |
 | HN5 | `WebhookOptions` not validated at startup | `IValidateOptions<WebhookOptions>` + `.ValidateOnStart()` |
 
@@ -1224,7 +1224,7 @@ Review the generated migration before committing. Destructive changes (column dr
 | Multi-user / RBAC | Multiple operators with separate credentials | Add user table + roles; replace single `AuthOptions` with a user store. Domain/Application layers unchanged. |
 | Full-Text Search | `LIKE` too slow at scale | Add FTS catalog in EF migration; replace `LIKE` with `EF.Functions.Contains()`. One handler change. |
 | Bulk export | User request | `GET /api/tokens/{uuid}/requests/export` returning NDJSON or ZIP. |
-| Hangfire | Complex scheduled jobs needed | Add `WebhookService.Worker` project; move `RetentionCleanupService` to recurring Hangfire job. |
+| Hangfire | Complex scheduled jobs needed | Add `Hookbin.Worker` project; move `RetentionCleanupService` to recurring Hangfire job. |
 
 ---
 
@@ -1257,7 +1257,7 @@ Look for `Initialisation complete.` in the output. If absent, verify `SA_PASSWOR
 
 ### Generated webhook URLs show the wrong hostname
 
-`WEBHOOK_BASE_URL` must be the address that external callers can reach, including the port. For local dev: `http://localhost:8088`. For LAN: `http://192.168.1.10:8088`. Not the internal container name (`http://api:8080`).
+`HOOKBIN_BASE_URL` must be the address that external callers can reach, including the port. For local dev: `http://localhost:8088`. For LAN: `http://192.168.1.10:8088`. Not the internal container name (`http://api:8080`).
 
 ### SSE does not update in real time
 
@@ -1285,7 +1285,7 @@ Docker must be running. Testcontainers pulls `mcr.microsoft.com/mssql/server:202
 
 ### E2E tests fail with `playwright.ps1 not found`
 
-Run `dotnet build tests/WebhookService.E2ETests/` first. The `playwright.ps1` script is only present after the project is built.
+Run `dotnet build tests/Hookbin.E2ETests/` first. The `playwright.ps1` script is only present after the project is built.
 
 ### API returns 401 on all requests / app redirects to login immediately
 
@@ -1300,5 +1300,5 @@ The API fails startup validation if `AUTH_USERNAME` or `AUTH_PASSWORD_HASH` are 
 
 ```bash
 dotnet restore
-cd frontend/webhook-spa && npm install
+cd frontend/hookbin-spa && npm install
 ```

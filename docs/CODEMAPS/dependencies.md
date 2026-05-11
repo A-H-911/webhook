@@ -71,16 +71,16 @@
 
 | Service | Image | Host Port | Purpose |
 |---------|-------|-----------|---------|
-| `api` | Custom .NET (`PROJECT_NAME=WebhookService.API`) | 8080 | Backend API + SSE fan-out |
-| `stream-worker` | Custom .NET (`PROJECT_NAME=WebhookService.StreamWorker`) | none | Redis stream consumer → SQL persist |
-| `jobs-worker` | Custom .NET (`PROJECT_NAME=WebhookService.JobsWorker`) | none | Retention cleanup (single replica) |
+| `api` | Custom .NET (`PROJECT_NAME=Hookbin.API`) | 8080 | Backend API + SSE fan-out |
+| `stream-worker` | Custom .NET (`PROJECT_NAME=Hookbin.StreamWorker`) | none | Redis stream consumer → SQL persist |
+| `jobs-worker` | Custom .NET (`PROJECT_NAME=Hookbin.JobsWorker`) | none | Retention cleanup (single replica) |
 | `sqlserver` | Custom (SQL Server 2022) | 1433 | Primary data store |
 | `redis` | `redis:7-alpine` | 6379 (localhost only) | Stream + pub/sub + token cache |
 | `seq` | `datalust/seq:latest` | 5341 (ingest), 5342 (UI) | Structured log aggregation |
 | `frontend` | Custom nginx | 8088 | Static SPA + reverse proxy |
 
 **Runtime image:** `mcr.microsoft.com/dotnet/aspnet:10.0` — `curl` installed via `apt-get` for Docker health checks.
-**Dockerfile:** Parameterized with `ARG PROJECT_NAME=WebhookService.API` — single file builds all three .NET services.
+**Dockerfile:** Parameterized with `ARG PROJECT_NAME=Hookbin.API` — single file builds all three .NET services.
 
 ## Tools
 
@@ -92,12 +92,12 @@
   Dollar signs followed by letters (e.g. `$fekMo4`) are interpolated as variables by Docker Compose
 
 ### Architecture Test Scripts
-- `scripts/run-arch-tests.ps1` — PowerShell 7+ (cross-OS: Windows, Linux, macOS); runs `dotnet test tests/WebhookService.ArchitectureTests/`
+- `scripts/run-arch-tests.ps1` — PowerShell 7+ (cross-OS: Windows, Linux, macOS); runs `dotnet test tests/Hookbin.ArchitectureTests/`
 - `scripts/run-arch-tests.sh` — Bash (Linux, macOS, Git Bash on Windows); same command
 
 ## Key Config / Env
 ```
-WEBHOOK_BASE_URL          — public base URL for webhook URLs (empty in appsettings.json → validator fires)
+HOOKBIN_BASE_URL          — public base URL for webhook URLs (empty in appsettings.json → validator fires)
                             Dev:   appsettings.Development.json → http://localhost:8080
                             Local: set in .env → http://localhost:8088
                             ngrok: set in .env → https://your-domain.ngrok.app
@@ -107,7 +107,7 @@ AUTH_PASSWORD_HASH        — BCrypt hash, single-quoted in .env to prevent $ in
 AUTH_SESSION_HOURS        — cookie sliding expiry (default 8)
 CORS_ALLOWED_ORIGINS      — comma-separated origins (dev: http://localhost:4200)
 
-WEBHOOK_WORKER_ID         — StreamWorker Redis consumer group name
+HOOKBIN_WORKER_ID         — StreamWorker Redis consumer group name
                             Compose: stream-worker-1 | Fallback: consumer-{MachineName}
                             Must be stable across restarts — changing it orphans PEL entries
 

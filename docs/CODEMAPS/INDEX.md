@@ -1,4 +1,4 @@
-# Webhook Service — Codemaps Index
+# Hookbin — Codemaps Index
 
 **Last Updated:** 2026-05-11 (architecture tests suite; domain entity encapsulation; FluentAssertions alignment; WebhookTokenRepository.UpdateAsync fix for EF Core owned entities)
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-Webhook Inspector is a self-hosted webhook debugging platform built with:
+Hookbin is a self-hosted webhook debugging platform built with:
 - **.NET 10** backend (Clean Architecture: Domain → Application → Infrastructure → API)
 - **Angular 21** frontend SPA (standalone components, Angular Material)
 - **SQL Server 2022** with Testcontainers for integration testing
@@ -60,8 +60,8 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 ## Recent Changes (as of 2026-05-11 — Architecture Tests + Domain Encapsulation)
 
 ### Architecture Tests (commit 9062d68)
-- **`tests/WebhookService.ArchitectureTests/`** — new project, 26 rules, ArchUnitNET 0.13.3 + NetArchTest.eNhancedEdition 1.4.5
-- **Layer dependency tests (8)** — enforce Clean Architecture; fail on any `using WebhookService.Infrastructure` inside Domain etc.
+- **`tests/Hookbin.ArchitectureTests/`** — new project, 26 rules, ArchUnitNET 0.13.3 + NetArchTest.eNhancedEdition 1.4.5
+- **Layer dependency tests (8)** — enforce Clean Architecture; fail on any `using Hookbin.Infrastructure` inside Domain etc.
 - **CQRS convention tests (5)** — commands are `sealed record`, handlers are `internal sealed class`, validators inherit `AbstractValidator`
 - **Repository/entity tests (4)** — interfaces in Domain, impls in Infrastructure, entities are sealed + immutable externally
 - **Controller/middleware tests (3)** — public sealed controllers, consistent naming
@@ -77,7 +77,7 @@ Webhook Inspector is a self-hosted webhook debugging platform built with:
 - EF Core compatibility: reflection-based access, no `PropertyAccessMode` change needed
 
 ### WebhookOptionsValidator Namespace Fix
-- Moved from `WebhookService.Application.Options` → `WebhookService.API.Options` (source file is in `src/WebhookService.API/Options/`)
+- Moved from `Hookbin.Application.Options` → `Hookbin.API.Options` (source file is in `src/Hookbin.API/Options/`)
 - `Program.cs` uses alias; `WebhookOptionsValidatorTests.cs` updated with new `using`
 
 ### Test Count Update
@@ -150,7 +150,7 @@ No feature changes, no infrastructure changes, no breaking API changes.
 ### Infrastructure
 - **`RedisStreamConsumerService`** — decoupled from `ISseNotifier`; now publishes only via Redis pub/sub
 - **`RedisSseBridgeService`** — stays in API; subscribes to `sse:*` and writes to in-process `SseNotifier`
-- **Consumer name** — stable via `WEBHOOK_WORKER_ID` env var (prevents PEL orphaning on restart)
+- **Consumer name** — stable via `HOOKBIN_WORKER_ID` env var (prevents PEL orphaning on restart)
 - **Dockerfile** — parameterized with `ARG PROJECT_NAME`; `curl` installed for health checks
 
 ### Tests (as of 2026-05-10)
@@ -163,15 +163,15 @@ No feature changes, no infrastructure changes, no breaking API changes.
 ### Backend Updates
 - **GetTokenQueryHandler.cs** — switched from `IConfiguration` to `IOptions<WebhookOptions>` (consistent with `CreateTokenCommandHandler`)
 - **GetTokensQueryHandler.cs** — same change; all three token query/command handlers now use the validated Options pattern
-- **appsettings.json** — `Webhook:BaseUrl` default changed from `http://localhost:5000` → `""` (startup validator now fires when `WEBHOOK_BASE_URL` not set)
+- **appsettings.json** — `Webhook:BaseUrl` default changed from `http://localhost:5000` → `""` (startup validator now fires when `HOOKBIN_BASE_URL` not set)
 - **appsettings.Development.json** — `Webhook:BaseUrl` changed from `http://localhost:5000` → `http://localhost:8080` (matches Angular dev proxy port)
 
 ### Infrastructure Updates
-- **docker-compose.override.yml** — `Webhook__BaseUrl` was hardcoded as `http://localhost:8088`, silently overriding `.env`. Fixed to `${WEBHOOK_BASE_URL}` so both local and ngrok modes work correctly.
+- **docker-compose.override.yml** — `Hookbin__BaseUrl` was hardcoded as `http://localhost:8088`, silently overriding `.env`. Fixed to `${HOOKBIN_BASE_URL}` so both local and ngrok modes work correctly.
 - **.env.example** — updated with two documented examples (local docker-compose and ngrok mode) plus note that URL is computed at read time
 
 ### Test Updates
-- **DashboardE2ETests.cs** — added `TokenDetail_WebhookUrl_UsesConfiguredBaseUrl` regression test (verifies webhook URL uses `WEBHOOK_BASE_URL`, not localhost)
+- **DashboardE2ETests.cs** — added `TokenDetail_WebhookUrl_UsesConfiguredBaseUrl` regression test (verifies webhook URL uses `HOOKBIN_BASE_URL`, not localhost)
 - **DashboardE2EFixture** — added XSRF-TOKEN priming GET after login (fixes antiforgery header for write API calls in E2E)
 - **TokenDetail_DeleteToken_RedirectsToDashboard** — fixed to use Angular Material `ConfirmDialogComponent` selector instead of `page.Dialog` (browser dialog never fires)
 
@@ -200,17 +200,17 @@ No feature changes, no infrastructure changes, no breaking API changes.
 
 | Layer | File | Purpose |
 |-------|------|---------|
-| **API** | `src/WebhookService.API/Program.cs` | DI (Core+Api), middleware, endpoint mapping |
-| **StreamWorker** | `src/WebhookService.StreamWorker/Program.cs` | DI (Core+Stream), Polly DB wait, health endpoints |
-| **JobsWorker** | `src/WebhookService.JobsWorker/Program.cs` | DI (Core+Jobs), Polly DB wait, health endpoints |
-| **Controllers** | `src/WebhookService.API/Controllers/WebhookController.cs` | `POST /webhook/{token:guid}` receiver |
-| **Middleware** | `src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs` | Exception → HTTP status, SSE guards |
-| **Domain** | `src/WebhookService.Domain/Entities/WebhookToken.cs` | Token aggregate root |
-| **Application** | `src/WebhookService.Application/Tokens/Commands/` | CQRS command handlers |
-| **Infrastructure** | `src/WebhookService.Infrastructure/DependencyInjection.cs` | Four DI extensions; Redis + EF registrations |
-| **Infrastructure** | `src/WebhookService.Infrastructure/Sse/SseNotifier.cs` | Channel-based SSE broadcast |
-| **Frontend** | `frontend/webhook-spa/src/app/app.ts` | Root Angular component, auth, logout |
-| **Services** | `frontend/webhook-spa/src/app/core/services/sse.service.ts` | EventSource SSE client |
+| **API** | `src/Hookbin.API/Program.cs` | DI (Core+Api), middleware, endpoint mapping |
+| **StreamWorker** | `src/Hookbin.StreamWorker/Program.cs` | DI (Core+Stream), Polly DB wait, health endpoints |
+| **JobsWorker** | `src/Hookbin.JobsWorker/Program.cs` | DI (Core+Jobs), Polly DB wait, health endpoints |
+| **Controllers** | `src/Hookbin.API/Controllers/WebhookController.cs` | `POST /webhook/{token:guid}` receiver |
+| **Middleware** | `src/Hookbin.API/Middleware/GlobalExceptionMiddleware.cs` | Exception → HTTP status, SSE guards |
+| **Domain** | `src/Hookbin.Domain/Entities/WebhookToken.cs` | Token aggregate root |
+| **Application** | `src/Hookbin.Application/Tokens/Commands/` | CQRS command handlers |
+| **Infrastructure** | `src/Hookbin.Infrastructure/DependencyInjection.cs` | Four DI extensions; Redis + EF registrations |
+| **Infrastructure** | `src/Hookbin.Infrastructure/Sse/SseNotifier.cs` | Channel-based SSE broadcast |
+| **Frontend** | `frontend/hookbin-spa/src/app/app.ts` | Root Angular component, auth, logout |
+| **Services** | `frontend/hookbin-spa/src/app/core/services/sse.service.ts` | EventSource SSE client |
 
 ---
 

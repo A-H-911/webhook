@@ -1,10 +1,10 @@
 ---
-name: Webhook Service Project Memory
-description: Durable project context for the webhook-service repository
+name: Hookbin Project Memory
+description: Durable project context for the hookbin repository
 type: project
 ---
 
-# Webhook Service — Project Memory
+# Hookbin — Project Memory
 
 ## What This Project Is
 
@@ -30,13 +30,13 @@ A self-hosted webhook inspection tool: receive arbitrary HTTP requests at a uniq
 
 ```bash
 # Unit tests only (no Docker)
-dotnet test tests/WebhookService.UnitTests/
+dotnet test tests/Hookbin.UnitTests/
 
 # All tests (Docker required for integration)
 dotnet test
 
 # E2E (stack must be running)
-E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
 ```
 
 ## Docker Compose Ports

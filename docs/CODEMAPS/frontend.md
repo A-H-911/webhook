@@ -127,26 +127,26 @@ Spec files (9): app, theme.service, auth.service, token.service, request.service
 Total tests: 118 (all green)
 Coverage:    92% stmt / 84% branch / 90% fn / 93% line
 Thresholds:  80/75/80/80 (stmt/branch/fn/line) — enforced in angular.json
-Run:         cd frontend/webhook-spa && npm test -- --watch=false --coverage
+Run:         cd frontend/hookbin-spa && npm test -- --watch=false --coverage
 ```
 
 ## Key Files
 ```
-frontend/webhook-spa/src/main.ts
-frontend/webhook-spa/src/app/app.config.ts                                  (providers, APP_INITIALIZER)
-frontend/webhook-spa/src/app/app.routes.ts                                  (route table)
-frontend/webhook-spa/src/app/core/services/auth.service.ts
-frontend/webhook-spa/src/app/core/services/sse.service.ts
-frontend/webhook-spa/src/app/core/services/token.service.ts
-frontend/webhook-spa/src/app/core/services/request.service.ts              (includes updateNote)
-frontend/webhook-spa/src/app/core/guards/auth.guard.ts
-frontend/webhook-spa/src/app/core/interceptors/http-error.interceptor.ts
-frontend/webhook-spa/src/app/core/models/request-detail.model.ts           (processingTimeMs, note fields)
-frontend/webhook-spa/src/app/features/dashboard/dashboard.component.ts
-frontend/webhook-spa/src/app/features/dashboard/create-token-dialog.component.ts
-frontend/webhook-spa/src/app/features/token-detail/token-detail.component.ts  (computed signals, note UX)
-frontend/webhook-spa/src/app/features/token-detail/token-detail.component.html (kv-tables, threat-links, note)
-frontend/webhook-spa/src/app/features/custom-response/custom-response-dialog.component.ts
-frontend/webhook-spa/src/app/services/theme.service.ts
-frontend/webhook-spa/angular.json                                           (coverageThresholds, coverageExclude)
+frontend/hookbin-spa/src/main.ts
+frontend/hookbin-spa/src/app/app.config.ts                                  (providers, APP_INITIALIZER)
+frontend/hookbin-spa/src/app/app.routes.ts                                  (route table)
+frontend/hookbin-spa/src/app/core/services/auth.service.ts
+frontend/hookbin-spa/src/app/core/services/sse.service.ts
+frontend/hookbin-spa/src/app/core/services/token.service.ts
+frontend/hookbin-spa/src/app/core/services/request.service.ts              (includes updateNote)
+frontend/hookbin-spa/src/app/core/guards/auth.guard.ts
+frontend/hookbin-spa/src/app/core/interceptors/http-error.interceptor.ts
+frontend/hookbin-spa/src/app/core/models/request-detail.model.ts           (processingTimeMs, note fields)
+frontend/hookbin-spa/src/app/features/dashboard/dashboard.component.ts
+frontend/hookbin-spa/src/app/features/dashboard/create-token-dialog.component.ts
+frontend/hookbin-spa/src/app/features/token-detail/token-detail.component.ts  (computed signals, note UX)
+frontend/hookbin-spa/src/app/features/token-detail/token-detail.component.html (kv-tables, threat-links, note)
+frontend/hookbin-spa/src/app/features/custom-response/custom-response-dialog.component.ts
+frontend/hookbin-spa/src/app/services/theme.service.ts
+frontend/hookbin-spa/angular.json                                           (coverageThresholds, coverageExclude)
 ```

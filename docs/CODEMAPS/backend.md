@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-11 | Verified: 310 unit + 26 arch + 59 integration tests; PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery returns processingTimeMs + note fields; domain entity encapsulation (private setters + mutation methods); WebhookOptionsValidator moved to WebhookService.API.Options -->
+<!-- Generated: 2026-05-11 | Verified: 310 unit + 26 arch + 59 integration tests; PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery returns processingTimeMs + note fields; domain entity encapsulation (private setters + mutation methods); WebhookOptionsValidator moved to Hookbin.API.Options -->
 
 # Backend Architecture
 
@@ -89,37 +89,37 @@ ResetCustomResponseCommand → ... → cache.Remove
 
 ## Key Files — API
 ```
-src/WebhookService.API/Program.cs                               (DI: AddCoreInfrastructure + AddApiInfrastructure)
-src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs  (BadHttpRequestException, SSE guard)
-src/WebhookService.API/Controllers/AuthController.cs           (login/logout/me + ISessionRevocationStore)
-src/WebhookService.API/Controllers/WebhookController.cs        (receiver: ITokenCache, IRequestQueuePublisher)
-src/WebhookService.API/Controllers/SseController.cs            (SSE subscribe, 10-connection cap)
-src/WebhookService.API/Controllers/TokensController.cs         (CRUD + custom-response)
-src/WebhookService.API/Controllers/RequestsController.cs       (paging, export, delete)
-src/WebhookService.API/Services/ISessionRevocationStore.cs
-src/WebhookService.API/Services/RedisSessionRevocationStore.cs
+src/Hookbin.API/Program.cs                               (DI: AddCoreInfrastructure + AddApiInfrastructure)
+src/Hookbin.API/Middleware/GlobalExceptionMiddleware.cs  (BadHttpRequestException, SSE guard)
+src/Hookbin.API/Controllers/AuthController.cs           (login/logout/me + ISessionRevocationStore)
+src/Hookbin.API/Controllers/WebhookController.cs        (receiver: ITokenCache, IRequestQueuePublisher)
+src/Hookbin.API/Controllers/SseController.cs            (SSE subscribe, 10-connection cap)
+src/Hookbin.API/Controllers/TokensController.cs         (CRUD + custom-response)
+src/Hookbin.API/Controllers/RequestsController.cs       (paging, export, delete)
+src/Hookbin.API/Services/ISessionRevocationStore.cs
+src/Hookbin.API/Services/RedisSessionRevocationStore.cs
 ```
 
 ## Key Files — Infrastructure
 ```
-src/WebhookService.Infrastructure/DependencyInjection.cs       (AddCoreInfrastructure, AddApiInfrastructure, AddStreamWorkerInfrastructure, AddJobsWorkerInfrastructure)
-src/WebhookService.Infrastructure/Redis/RedisStreamPublisher.cs (XADD webhook-requests)
-src/WebhookService.Infrastructure/Redis/RedisTokenCache.cs      (IMemoryCache wrapper, 5-min sliding)
-src/WebhookService.Infrastructure/Redis/RedisStreamConsumerService.cs (XREADGROUP, PEL recovery, XACK)
-src/WebhookService.Infrastructure/Redis/RedisSseBridgeService.cs (SUBSCRIBE sse:* → SseNotifier)
-src/WebhookService.Infrastructure/Sse/SseNotifier.cs            (Channel<SseEvent>, max 10/token)
-src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs (24h PeriodicTimer)
-src/WebhookService.Infrastructure/Persistence/ApplicationDbContext.cs
-src/WebhookService.Infrastructure/Persistence/Repositories/WebhookRequestRepository.cs (ThenByDescending Id for determinism)
-src/WebhookService.Application/Caching/ITokenCache.cs
-src/WebhookService.Domain/Services/IRequestQueuePublisher.cs
-src/WebhookService.Domain/Services/ISseNotifier.cs
+src/Hookbin.Infrastructure/DependencyInjection.cs       (AddCoreInfrastructure, AddApiInfrastructure, AddStreamWorkerInfrastructure, AddJobsWorkerInfrastructure)
+src/Hookbin.Infrastructure/Redis/RedisStreamPublisher.cs (XADD webhook-requests)
+src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs      (IMemoryCache wrapper, 5-min sliding)
+src/Hookbin.Infrastructure/Redis/RedisStreamConsumerService.cs (XREADGROUP, PEL recovery, XACK)
+src/Hookbin.Infrastructure/Redis/RedisSseBridgeService.cs (SUBSCRIBE sse:* → SseNotifier)
+src/Hookbin.Infrastructure/Sse/SseNotifier.cs            (Channel<SseEvent>, max 10/token)
+src/Hookbin.Infrastructure/BackgroundServices/RetentionCleanupService.cs (24h PeriodicTimer)
+src/Hookbin.Infrastructure/Persistence/ApplicationDbContext.cs
+src/Hookbin.Infrastructure/Persistence/Repositories/WebhookRequestRepository.cs (ThenByDescending Id for determinism)
+src/Hookbin.Application/Caching/ITokenCache.cs
+src/Hookbin.Domain/Services/IRequestQueuePublisher.cs
+src/Hookbin.Domain/Services/ISseNotifier.cs
 ```
 
 ## Key Files — Workers
 ```
-src/WebhookService.StreamWorker/Program.cs   (AddCoreInfrastructure + AddStreamWorkerInfrastructure; Polly DB wait; /health/live + /health/ready)
-src/WebhookService.JobsWorker/Program.cs     (AddCoreInfrastructure + AddJobsWorkerInfrastructure; Polly DB wait; SQL-only health check)
+src/Hookbin.StreamWorker/Program.cs   (AddCoreInfrastructure + AddStreamWorkerInfrastructure; Polly DB wait; /health/live + /health/ready)
+src/Hookbin.JobsWorker/Program.cs     (AddCoreInfrastructure + AddJobsWorkerInfrastructure; Polly DB wait; SQL-only health check)
 ```
 
 ## Options (validated at startup)
@@ -128,13 +128,13 @@ Webhook:BaseUrl          (required) — used by API only; workers don't need it
 Webhook:RetentionDays    — used by JobsWorker's RetentionCleanupService
 Webhook:MaxRequestSizeMb — Kestrel body size limit (API only)
 Auth:Username / PasswordHash / SessionHours — API only
-WEBHOOK_WORKER_ID        — StreamWorker consumer identity; stable across restarts
+HOOKBIN_WORKER_ID        — StreamWorker consumer identity; stable across restarts
 ```
-⚠ `WebhookOptionsValidator` lives in `WebhookService.API.Options` (not Application) — its source file path
-matches `src/WebhookService.API/Options/`. It implements `IValidateOptions<WebhookOptions>` from Application.
+⚠ `WebhookOptionsValidator` lives in `Hookbin.API.Options` (not Application) — its source file path
+matches `src/Hookbin.API/Options/`. It implements `IValidateOptions<WebhookOptions>` from Application.
 
 ## Architecture Tests
-`tests/WebhookService.ArchitectureTests/` — 26 rules enforced at build time:
+`tests/Hookbin.ArchitectureTests/` — 26 rules enforced at build time:
 ```
 Layers/LayerDependencyTests.cs          (8)  — layer isolation, no cycles
 Conventions/CqrsConventionTests.cs      (5)  — sealed record commands, internal sealed handlers, validators
@@ -143,7 +143,7 @@ Conventions/ControllerMiddlewareConventionTests.cs (3) — public sealed control
 Conventions/TestProjectConventionTests.cs (3) — FA version uniformity, sealed test classes
 Structure/FolderNamespaceTests.cs        (3) — folder path matches CLR namespace
 ```
-Run: `dotnet test tests/WebhookService.ArchitectureTests/`  (no Docker, ~1s)
+Run: `dotnet test tests/Hookbin.ArchitectureTests/`  (no Docker, ~1s)
 
 ## Request Note Command
 ```
@@ -153,7 +153,7 @@ PATCH /api/tokens/{tokenId}/requests/{id}/note  [FromBody] { note: string|null }
   → IWebhookRequestRepository.UpdateNoteAsync → ExecuteUpdateAsync
   Returns 200 OK / 404 Not Found
 ```
-Key files: `src/WebhookService.Application/Requests/Commands/SetRequestNote/`
+Key files: `src/Hookbin.Application/Requests/Commands/SetRequestNote/`
 
 ## Domain Entity Mutation Methods
 `WebhookToken` and `WebhookRequest` use `private set;` on mutable properties — callers use intent-named methods:

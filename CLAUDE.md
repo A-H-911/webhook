@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Agent-facing guide for the Webhook Service repository. For full architecture, design decisions, and user guides see **README.md** (the single source of truth).
+Agent-facing guide for the Hookbin repository. For full architecture, design decisions, and user guides see **README.md** (the single source of truth).
 
 ---
 
@@ -19,19 +19,19 @@ dotnet test
 dotnet test --filter "FullyQualifiedName~PostToWebhook_Returns200_AndCreatesRequest"
 
 # Run only unit tests (no Docker required)
-dotnet test tests/WebhookService.UnitTests/
+dotnet test tests/Hookbin.UnitTests/
 
 # Run architecture tests (no Docker required)
-dotnet test tests/WebhookService.ArchitectureTests/
+dotnet test tests/Hookbin.ArchitectureTests/
 # OR via cross-OS scripts:
 #   pwsh scripts/run-arch-tests.ps1      (Windows / Linux / macOS — PowerShell 7+)
 #   bash scripts/run-arch-tests.sh       (Linux / macOS / Git Bash on Windows)
 
 # Run only integration tests (requires Docker — SQL Server container via Testcontainers)
-dotnet test tests/WebhookService.IntegrationTests/
+dotnet test tests/Hookbin.IntegrationTests/
 
 # Apply EF Core migrations
-dotnet ef database update --project src/WebhookService.Infrastructure --startup-project src/WebhookService.API
+dotnet ef database update --project src/Hookbin.Infrastructure --startup-project src/Hookbin.API
 
 # Format code
 dotnet format
@@ -40,7 +40,7 @@ dotnet format
 ### Frontend (Angular 21)
 
 ```bash
-cd frontend/webhook-spa
+cd frontend/hookbin-spa
 
 # Install dependencies
 npm install
@@ -62,13 +62,13 @@ npm test
 dotnet build
 
 # Step 2 — install Chromium (first run only)
-pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
+pwsh tests/Hookbin.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
 # Step 3 — run E2E tests (stack must be running; use port 8088 for docker compose)
-E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/Hookbin.E2ETests/
 
 # Dev mode: Angular dev server at 4200 + backend at 8080
-E2E_BASE_URL=http://localhost:4200 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:4200 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/Hookbin.E2ETests/
 ```
 
 ### Docker
@@ -103,18 +103,18 @@ Three deployable units share the same Domain/Application/Infrastructure librarie
 
 ```
 src/
-  WebhookService.Domain/          # Entities, value objects, repository interfaces, ISseNotifier
-  WebhookService.Application/     # CQRS handlers (MediatR), DTOs, validation behaviors
-  WebhookService.Infrastructure/  # EF Core (MSSQL), SseNotifier, RedisSseBridgeService, stream consumer, retention
-  WebhookService.API/             # ASP.NET Core HTTP endpoints — AddCoreInfrastructure + AddApiInfrastructure
-  WebhookService.StreamWorker/    # Redis stream consumer worker — AddCoreInfrastructure + AddStreamWorkerInfrastructure
-  WebhookService.JobsWorker/      # Retention cleanup worker — AddCoreInfrastructure + AddJobsWorkerInfrastructure
-frontend/webhook-spa/             # Angular 21 standalone components, Angular Material, SSE client
+  Hookbin.Domain/          # Entities, value objects, repository interfaces, ISseNotifier
+  Hookbin.Application/     # CQRS handlers (MediatR), DTOs, validation behaviors
+  Hookbin.Infrastructure/  # EF Core (MSSQL), SseNotifier, RedisSseBridgeService, stream consumer, retention
+  Hookbin.API/             # ASP.NET Core HTTP endpoints — AddCoreInfrastructure + AddApiInfrastructure
+  Hookbin.StreamWorker/    # Redis stream consumer worker — AddCoreInfrastructure + AddStreamWorkerInfrastructure
+  Hookbin.JobsWorker/      # Retention cleanup worker — AddCoreInfrastructure + AddJobsWorkerInfrastructure
+frontend/hookbin-spa/             # Angular 21 standalone components, Angular Material, SSE client
 tests/
-  WebhookService.UnitTests/       # xUnit — domain entity tests, no infrastructure
-  WebhookService.IntegrationTests/# xUnit + Testcontainers.MsSql + WebApplicationFactory
-  WebhookService.E2ETests/        # Playwright headless Chromium
-  WebhookService.ArchitectureTests/ # ArchUnitNET + NetArchTest — layer deps, CQRS conventions, no Docker
+  Hookbin.UnitTests/       # xUnit — domain entity tests, no infrastructure
+  Hookbin.IntegrationTests/# xUnit + Testcontainers.MsSql + WebApplicationFactory
+  Hookbin.E2ETests/        # Playwright headless Chromium
+  Hookbin.ArchitectureTests/ # ArchUnitNET + NetArchTest — layer deps, CQRS conventions, no Docker
 docker/
   sqlserver/                      # Custom image: entrypoint.sh polls → runs init.sql
   frontend/                       # Nginx multi-stage Dockerfile + nginx.conf
@@ -124,11 +124,11 @@ docker/
 
 ## Key Non-Obvious Facts
 
-**URL routing:** The webhook *receiver* endpoint is `POST /webhook/{token:guid}`. The `webhookUrl` stored in the DB is `{WEBHOOK_BASE_URL}/webhook/{guid}`.
+**URL routing:** The webhook *receiver* endpoint is `POST /webhook/{token:guid}`. The `webhookUrl` stored in the DB is `{HOOKBIN_BASE_URL}/webhook/{guid}`.
 
 **SSE endpoint:** `GET /api/tokens/{tokenId}/sse` — not `/api/events/`. Max 10 concurrent connections per token. Response starts with `retry: 5000\n\n`. **Wire event name is `event: request`** (not `new-request`) — Angular `SseService` calls `es.addEventListener('request', ...)` and maps internally to `{ eventType: 'new-request' }`. The `onopen` handler emits `{ eventType: 'connected' }` so the green dot appears immediately on connect.
 
-**Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. It runs in the **`WebhookService.JobsWorker`** process (not the API). Hangfire is not used. DB errors are caught and logged without stopping the timer. `jobs-worker` must run as **single replica only** — no leader election exists.
+**Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. It runs in the **`Hookbin.JobsWorker`** process (not the API). Hangfire is not used. DB errors are caught and logged without stopping the timer. `jobs-worker` must run as **single replica only** — no leader election exists.
 
 **Token cache:** `IMemoryCache` key `"token:{guid}"` with 5-minute sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found. Both active and inactive tokens are cached (receiver needs fast 410 lookup). `SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`, and `UpdateToken` all call `cache.Remove(tokenId)` after mutating.
 
@@ -158,9 +158,9 @@ docker/
 
 | Service | Dockerfile / args | Host Port |
 |---------|-----------|-----------|
-| `api` | `./Dockerfile` `PROJECT_NAME=WebhookService.API` | 8080 |
-| `stream-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.StreamWorker` | none (internal only) |
-| `jobs-worker` | `./Dockerfile` `PROJECT_NAME=WebhookService.JobsWorker` (single replica) | none (internal only) |
+| `api` | `./Dockerfile` `PROJECT_NAME=Hookbin.API` | 8080 |
+| `stream-worker` | `./Dockerfile` `PROJECT_NAME=Hookbin.StreamWorker` | none (internal only) |
+| `jobs-worker` | `./Dockerfile` `PROJECT_NAME=Hookbin.JobsWorker` (single replica) | none (internal only) |
 | `frontend` | `docker/frontend/Dockerfile` (context `.`) | 8088 |
 | `sqlserver` | `docker/sqlserver/Dockerfile` | 1433 |
 | `seq` | `datalust/seq:latest` (no build) | 5341 (ingest, localhost only), 5342 (UI, localhost only) |
@@ -175,29 +175,29 @@ Files where knowing their location saves substantial search time:
 
 | File | What it does |
 |------|-------------|
-| `src/WebhookService.API/Program.cs` | DI registration, middleware pipeline, endpoint mapping |
-| `src/WebhookService.API/Middleware/GlobalExceptionMiddleware.cs` | Exception → HTTP status; SSE disconnect guard; `HasStarted` check |
-| `src/WebhookService.API/Controllers/WebhookController.cs` | `POST /webhook/{token:guid}` receiver — captures and persists requests |
-| `src/WebhookService.API/Controllers/SseController.cs` | `GET /api/tokens/{id}/sse` — SSE channel subscribe/stream |
-| `src/WebhookService.API/Controllers/TokensController.cs` | Token CRUD + `SetCustomResponse` / `ResetCustomResponse` |
-| `src/WebhookService.API/Controllers/RequestsController.cs` | Request paging, GetById, Export (JSON file), ClearAll, Delete |
-| `src/WebhookService.API/Options/WebhookOptions.cs` | Options model: `BaseUrl`, `RetentionDays`, `MaxRequestSizeMb` |
-| `src/WebhookService.API/Options/WebhookOptionsValidator.cs` | Startup-time `IValidateOptions` — throws if config is invalid |
-| `src/WebhookService.Domain/Entities/WebhookToken.cs` | Token aggregate root; owns `CustomResponse` value object |
-| `src/WebhookService.Domain/Entities/WebhookRequest.cs` | Request entity; headers stored as JSON string |
-| `src/WebhookService.Domain/ValueObjects/CustomResponse.cs` | Owned entity (EF Core): `StatusCode`, `ContentType`, `Body`, `Headers` |
-| `src/WebhookService.Domain/Services/ISseNotifier.cs` | SSE notifier interface — `SseNotifier` (prod) / `TestNullSseNotifier` (tests) |
-| `src/WebhookService.Application/Common/Behaviors/ValidationBehavior.cs` | MediatR pipeline — runs FluentValidation before every handler |
-| `src/WebhookService.Application/Common/Behaviors/LoggingBehavior.cs` | MediatR pipeline — logs request/response with timing |
-| `src/WebhookService.Infrastructure/Persistence/ApplicationDbContext.cs` | EF Core DbContext; entity configurations via `IEntityTypeConfiguration<T>` |
-| `src/WebhookService.Infrastructure/DependencyInjection.cs` | Four focused DI extensions: `AddCoreInfrastructure`, `AddApiInfrastructure`, `AddStreamWorkerInfrastructure`, `AddJobsWorkerInfrastructure` |
-| `src/WebhookService.Infrastructure/Sse/SseNotifier.cs` | `ConcurrentDictionary` of `Channel<SseEvent>` per token; `TryWrite` O(1) |
-| `src/WebhookService.Infrastructure/BackgroundServices/RetentionCleanupService.cs` | `PeriodicTimer` (24h) cleanup; `IServiceScopeFactory` for scoped DbContext |
-| `src/WebhookService.StreamWorker/Program.cs` | StreamWorker entry point: `AddCoreInfrastructure + AddStreamWorkerInfrastructure`; polls DB readiness via Polly; `/health/live` + `/health/ready` |
-| `src/WebhookService.JobsWorker/Program.cs` | JobsWorker entry point: `AddCoreInfrastructure + AddJobsWorkerInfrastructure`; polls DB readiness via Polly; `/health/live` + `/health/ready` (SQL-only) |
+| `src/Hookbin.API/Program.cs` | DI registration, middleware pipeline, endpoint mapping |
+| `src/Hookbin.API/Middleware/GlobalExceptionMiddleware.cs` | Exception → HTTP status; SSE disconnect guard; `HasStarted` check |
+| `src/Hookbin.API/Controllers/WebhookController.cs` | `POST /webhook/{token:guid}` receiver — captures and persists requests |
+| `src/Hookbin.API/Controllers/SseController.cs` | `GET /api/tokens/{id}/sse` — SSE channel subscribe/stream |
+| `src/Hookbin.API/Controllers/TokensController.cs` | Token CRUD + `SetCustomResponse` / `ResetCustomResponse` |
+| `src/Hookbin.API/Controllers/RequestsController.cs` | Request paging, GetById, Export (JSON file), ClearAll, Delete |
+| `src/Hookbin.API/Options/WebhookOptions.cs` | Options model: `BaseUrl`, `RetentionDays`, `MaxRequestSizeMb` |
+| `src/Hookbin.API/Options/WebhookOptionsValidator.cs` | Startup-time `IValidateOptions` — throws if config is invalid |
+| `src/Hookbin.Domain/Entities/WebhookToken.cs` | Token aggregate root; owns `CustomResponse` value object |
+| `src/Hookbin.Domain/Entities/WebhookRequest.cs` | Request entity; headers stored as JSON string |
+| `src/Hookbin.Domain/ValueObjects/CustomResponse.cs` | Owned entity (EF Core): `StatusCode`, `ContentType`, `Body`, `Headers` |
+| `src/Hookbin.Domain/Services/ISseNotifier.cs` | SSE notifier interface — `SseNotifier` (prod) / `TestNullSseNotifier` (tests) |
+| `src/Hookbin.Application/Common/Behaviors/ValidationBehavior.cs` | MediatR pipeline — runs FluentValidation before every handler |
+| `src/Hookbin.Application/Common/Behaviors/LoggingBehavior.cs` | MediatR pipeline — logs request/response with timing |
+| `src/Hookbin.Infrastructure/Persistence/ApplicationDbContext.cs` | EF Core DbContext; entity configurations via `IEntityTypeConfiguration<T>` |
+| `src/Hookbin.Infrastructure/DependencyInjection.cs` | Four focused DI extensions: `AddCoreInfrastructure`, `AddApiInfrastructure`, `AddStreamWorkerInfrastructure`, `AddJobsWorkerInfrastructure` |
+| `src/Hookbin.Infrastructure/Sse/SseNotifier.cs` | `ConcurrentDictionary` of `Channel<SseEvent>` per token; `TryWrite` O(1) |
+| `src/Hookbin.Infrastructure/BackgroundServices/RetentionCleanupService.cs` | `PeriodicTimer` (24h) cleanup; `IServiceScopeFactory` for scoped DbContext |
+| `src/Hookbin.StreamWorker/Program.cs` | StreamWorker entry point: `AddCoreInfrastructure + AddStreamWorkerInfrastructure`; polls DB readiness via Polly; `/health/live` + `/health/ready` |
+| `src/Hookbin.JobsWorker/Program.cs` | JobsWorker entry point: `AddCoreInfrastructure + AddJobsWorkerInfrastructure`; polls DB readiness via Polly; `/health/live` + `/health/ready` (SQL-only) |
 | `docker/sqlserver/entrypoint.sh` | Polls until SQL Server is ready, then runs `init.sql` |
 | `docker/frontend/nginx.conf` | Reverse proxy config; `proxy_buffering off` for SSE; security headers (HSTS, CSP, Permissions-Policy) |
-| `frontend/webhook-spa/src/app/services/sse.service.ts` | Angular SSE client; maps wire `event: request` → `eventType: 'new-request'` |
+| `frontend/hookbin-spa/src/app/services/sse.service.ts` | Angular SSE client; maps wire `event: request` → `eventType: 'new-request'` |
 | `tools/RotatePassword/Program.cs` | BCrypt password-rotation CLI — generates `AUTH_PASSWORD_HASH` for `.env` |
 
 ---
@@ -206,7 +206,7 @@ Files where knowing their location saves substantial search time:
 
 Follow this pattern for any new write operation (e.g., `ArchiveToken`):
 
-**1. Command record** — `src/WebhookService.Application/Tokens/Commands/ArchiveToken/ArchiveTokenCommand.cs`
+**1. Command record** — `src/Hookbin.Application/Tokens/Commands/ArchiveToken/ArchiveTokenCommand.cs`
 ```csharp
 public sealed record ArchiveTokenCommand(Guid TokenId) : IRequest;
 ```
@@ -250,7 +250,7 @@ public async Task<IActionResult> Archive(Guid id)
 
 **5. If mutating cached token data:** Call `cache.Remove(cmd.TokenId)` in the handler. Skipping this serves stale data for up to 5 minutes.
 
-**6. Architecture tests enforce conventions automatically.** The tests in `tests/WebhookService.ArchitectureTests/` will fail the CI `architecture-test` job if: the command is not a `sealed record`, the handler is not `internal sealed`, the validator does not inherit `AbstractValidator`, or the folder does not match the namespace. Run `dotnet test tests/WebhookService.ArchitectureTests/` locally before pushing.
+**6. Architecture tests enforce conventions automatically.** The tests in `tests/Hookbin.ArchitectureTests/` will fail the CI `architecture-test` job if: the command is not a `sealed record`, the handler is not `internal sealed`, the validator does not inherit `AbstractValidator`, or the folder does not match the namespace. Run `dotnet test tests/Hookbin.ArchitectureTests/` locally before pushing.
 
 For queries: implement `IRequest<TResult>` and return `TResult` from the handler. Validators are optional for read-only queries.
 
@@ -260,13 +260,13 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 
 | Scenario | Command |
 |----------|---------|
-| Architecture rules (no Docker) | `dotnet test tests/WebhookService.ArchitectureTests/` |
-| Quick smoke — domain logic only | `dotnet test tests/WebhookService.UnitTests/` |
+| Architecture rules (no Docker) | `dotnet test tests/Hookbin.ArchitectureTests/` |
+| Quick smoke — domain logic only | `dotnet test tests/Hookbin.UnitTests/` |
 | Full backend (requires Docker) | `dotnet test` |
 | Single test by name | `dotnet test --filter "FullyQualifiedName~<MethodName>"` |
-| E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/WebhookService.E2ETests/` |
-| Angular unit tests | `cd frontend/webhook-spa && npm test` |
-| Angular unit tests with coverage | `cd frontend/webhook-spa && npm test -- --watch=false --coverage` |
+| E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/Hookbin.E2ETests/` |
+| Angular unit tests | `cd frontend/hookbin-spa && npm test` |
+| Angular unit tests with coverage | `cd frontend/hookbin-spa && npm test -- --watch=false --coverage` |
 | Rebuild containers + wait healthy | `pwsh scripts/rebuild-and-wait.ps1` (Windows) or `bash scripts/rebuild-and-wait.sh` (Linux/macOS) |
 | Rebuild single service | `pwsh scripts/rebuild-and-wait.ps1 -Services api` |
 
@@ -295,10 +295,10 @@ Backend coverage thresholds are enforced via `tests/coverlet.runsettings` (80% l
 | **Always** persist WebhookRequest, even from inactive tokens | Callers rely on audit trail; removing persistence breaks compliance logging and makes 410 signal ambiguous. |
 | Receiver uses `GetByTokenIncludingInactiveAsync`, not `GetByTokenAsync` | Dashboard queries filter `IsActive=1` but receiver needs both states. Swapping methods causes inactive tokens to return 404 instead of 410. |
 | `tokenId` parameter in GetRequestById / ExportRequest / DeleteRequest repository methods | C# repository methods always include `tokenId` as a query filter (parameterized EF Core), preventing cross-token access. This is **not** raw SQL `WHERE` enforcement — it is enforced in C# method signatures. Single-admin deployment by design — no per-user tenancy. Removing the `tokenId` filter enables IDOR. |
-| Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph and `tests/WebhookService.ArchitectureTests/Layers/LayerDependencyTests.cs`. |
-| Architecture test conventions (CQRS naming, namespace alignment, sealed/internal checks) | If you intentionally need to break a documented convention, update the corresponding rule in `tests/WebhookService.ArchitectureTests/` in the same PR — the test failure is the early-warning system. |
+| Domain project has zero references to Application / Infrastructure / API | Violating this collapses the Clean Architecture dependency rule; enforced by project reference graph and `tests/Hookbin.ArchitectureTests/Layers/LayerDependencyTests.cs`. |
+| Architecture test conventions (CQRS naming, namespace alignment, sealed/internal checks) | If you intentionally need to break a documented convention, update the corresponding rule in `tests/Hookbin.ArchitectureTests/` in the same PR — the test failure is the early-warning system. |
 | `jobs-worker` runs as single replica only | `RetentionCleanupService` has no leader election. Running two replicas double-deletes rows on every 24h tick (benign but wasteful) and risks overlapping range scans causing deadlocks under high write load. Use `deploy.replicas: 1` in compose. |
-| `stream-worker` uses `WEBHOOK_WORKER_ID` env var for consumer name | Docker container IDs change on every `docker run`. If the consumer name changes, the old PEL entries are permanently orphaned in Redis — orphaned messages are never automatically reclaimed. Set `WEBHOOK_WORKER_ID=stream-worker-1` in compose. |
+| `stream-worker` uses `HOOKBIN_WORKER_ID` env var for consumer name | Docker container IDs change on every `docker run`. If the consumer name changes, the old PEL entries are permanently orphaned in Redis — orphaned messages are never automatically reclaimed. Set `HOOKBIN_WORKER_ID=stream-worker-1` in compose. |
 | Workers poll `CanConnectAsync`, never call `MigrateAsync` | API is the sole migration runner. If workers call `MigrateAsync` concurrently, SQL Server may deadlock schema-lock operations on cold start. Workers wait on DB readiness; migration races are the API's responsibility. |
 | `RedisSseBridgeService` stays in the API, not the StreamWorker | It writes into the in-process `SseNotifier` channel — those channels only exist in the API process where SSE HTTP connections are held. Moving it to the worker makes SSE fan-out a no-op. |
 | `[AllowAnonymous]` on `WebhookController` | External callers never have credentials. Removing it breaks all webhook delivery. |
@@ -325,13 +325,13 @@ Backend coverage thresholds are enforced via `tests/coverlet.runsettings` (80% l
 | `playwright.ps1 not found` | E2E project not built yet | `dotnet build` first |
 | SSE green dot never appears | `onopen` handler removed or `eventType: 'connected'` not emitted | Restore `onopen` in `SseService` |
 | Custom response returns 422 | `Headers` sent as parsed object instead of JSON string | Send `JSON.stringify(headers)` as the `headers` field |
-| Webhook URLs contain wrong base URL | `WEBHOOK_BASE_URL` env var wrong in `.env` | Set `WEBHOOK_BASE_URL=http://localhost:8088` |
+| Webhook URLs contain wrong base URL | `HOOKBIN_BASE_URL` env var wrong in `.env` | Set `HOOKBIN_BASE_URL=http://localhost:8088` |
 | SQL Server container exits immediately | Wrong `SA_PASSWORD` (must meet complexity) or < 3 GB RAM | Check `.env`, free RAM |
 | `dotnet ef database update` fails in CI | `dotnet-ef` tool not installed | `dotnet tool install -g dotnet-ef` |
 | 404 on all `/api/*` routes in docker compose | API not healthy; nginx started before API was ready | `docker compose logs api`, wait for health check |
-| Angular proxy 404 during `npm start` | Backend not running on port 8080 | `dotnet run --project src/WebhookService.API` first |
+| Angular proxy 404 during `npm start` | Backend not running on port 8080 | `dotnet run --project src/Hookbin.API` first |
 | New command handler never invoked | Validator constructor throws, or handler in wrong assembly | Verify validator has at least one `RuleFor`; handler must be in Application project |
-| EF migration fails with "pending model changes" | Model changed without adding a migration | `dotnet ef migrations add <Name> --project src/WebhookService.Infrastructure --startup-project src/WebhookService.API` |
+| EF migration fails with "pending model changes" | Model changed without adding a migration | `dotnet ef migrations add <Name> --project src/Hookbin.Infrastructure --startup-project src/Hookbin.API` |
 | API exits at startup with `ValidateOptionsResult.Fail` | `AUTH_USERNAME` or `AUTH_PASSWORD_HASH` missing or hash lacks `$2` prefix | Set both vars in `.env`; use `dotnet run --project tools/RotatePassword -- --password '<pass>'` to generate the hash (or `python3 -c "import bcrypt; print(bcrypt.hashpw(b'pass', bcrypt.gensalt(12)).decode())"`) |
 | App always redirects to `/login` even after correct credentials | `AUTH_PASSWORD_HASH` is plaintext, not a BCrypt hash | Replace with BCrypt hash; see §10 Configuration Reference in README |
 | SSE 401 in dev mode (`:4200` → `:8080`) | `withCredentials` removed from `EventSource` call in `SseService` | Restore `{ withCredentials: true }` |

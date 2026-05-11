@@ -1,15 +1,15 @@
-ARG PROJECT_NAME=WebhookService.API
+ARG PROJECT_NAME=Hookbin.API
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG PROJECT_NAME
 WORKDIR /src
 
-COPY ["src/WebhookService.API/WebhookService.API.csproj", "src/WebhookService.API/"]
-COPY ["src/WebhookService.Application/WebhookService.Application.csproj", "src/WebhookService.Application/"]
-COPY ["src/WebhookService.Domain/WebhookService.Domain.csproj", "src/WebhookService.Domain/"]
-COPY ["src/WebhookService.Infrastructure/WebhookService.Infrastructure.csproj", "src/WebhookService.Infrastructure/"]
-COPY ["src/WebhookService.StreamWorker/WebhookService.StreamWorker.csproj", "src/WebhookService.StreamWorker/"]
-COPY ["src/WebhookService.JobsWorker/WebhookService.JobsWorker.csproj", "src/WebhookService.JobsWorker/"]
+COPY ["src/Hookbin.API/Hookbin.API.csproj", "src/Hookbin.API/"]
+COPY ["src/Hookbin.Application/Hookbin.Application.csproj", "src/Hookbin.Application/"]
+COPY ["src/Hookbin.Domain/Hookbin.Domain.csproj", "src/Hookbin.Domain/"]
+COPY ["src/Hookbin.Infrastructure/Hookbin.Infrastructure.csproj", "src/Hookbin.Infrastructure/"]
+COPY ["src/Hookbin.StreamWorker/Hookbin.StreamWorker.csproj", "src/Hookbin.StreamWorker/"]
+COPY ["src/Hookbin.JobsWorker/Hookbin.JobsWorker.csproj", "src/Hookbin.JobsWorker/"]
 
 RUN dotnet restore "src/${PROJECT_NAME}/${PROJECT_NAME}.csproj"
 

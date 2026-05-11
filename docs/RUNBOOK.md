@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-05-11
 
-This guide covers deployment, health monitoring, troubleshooting, and operational procedures for the Webhook Service.
+This guide covers deployment, health monitoring, troubleshooting, and operational procedures for the Hookbin.
 
 ---
 
@@ -39,7 +39,7 @@ cp .env.example .env
 
 # Edit .env with production values:
 # - SA_PASSWORD: Strong SQL Server password (e.g., P@ssw0rd!SafeValue2024)
-# - WEBHOOK_BASE_URL: Public-facing URL (e.g., https://webhook.example.com)
+# - HOOKBIN_BASE_URL: Public-facing URL (e.g., https://webhook.example.com)
 # - AUTH_PASSWORD_HASH: BCrypt hash (generate below)
 # - RETENTION_DAYS: How long to keep request data (default: 7)
 # - MAX_REQUEST_SIZE_MB: Maximum request size (default: 5)
@@ -101,8 +101,8 @@ For deployments where you cannot afford downtime:
 ```bash
 # 1. Run migrations against a pre-warmed DB before deploying new code
 docker compose exec api dotnet ef database update \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 
 # 2. Build new images
 docker compose build
@@ -158,8 +158,8 @@ docker compose ps
 
 NAME               STATUS              PORTS
 webhook-api-1      Up (healthy)        8080/tcp
-webhook-stream-worker-1  Up (healthy)   (internal only)
-webhook-jobs-worker-1    Up (healthy)   (internal only)
+hookbin-stream-worker-1  Up (healthy)   (internal only)
+hookbin-jobs-worker-1    Up (healthy)   (internal only)
 webhook-frontend-1 Up (healthy)        8088/tcp
 webhook-sqlserver-1 Up (healthy)       1433/tcp
 webhook-seq-1      Up                  5341/tcp, 5342/tcp
@@ -241,7 +241,7 @@ docker compose logs > logs.txt
 |---------|---------|--------|
 | `Application started. Listening on` | API ready | Normal startup |
 | `The configured password does not match the expected format` | BCrypt hash invalid | Regenerate AUTH_PASSWORD_HASH |
-| `One or more validations failed: Webhook:BaseUrl must not be empty` | Missing WEBHOOK_BASE_URL | Set env var and restart |
+| `One or more validations failed: Webhook:BaseUrl must not be empty` | Missing HOOKBIN_BASE_URL | Set env var and restart |
 | `A timeout occurred while waiting for the database to be ready` | SQL Server not responding | Check SQL Server container health |
 | `An error occurred during migration: Cannot open database` | Migration failed | Check disk space; restart sqlserver |
 
@@ -341,7 +341,7 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
 # Or ensure .AllowCredentials() in Program.cs:
 # cors.AllowCredentials();
 
-# Verify EventSource in frontend/webhook-spa/src/app/core/services/sse.service.ts:
+# Verify EventSource in frontend/hookbin-spa/src/app/core/services/sse.service.ts:
 # new EventSource(url, { withCredentials: true })
 
 # Restart both services
@@ -459,8 +459,8 @@ docker compose up -d
 # 5. If migrations need to be rolled back, use EF Core:
 # (Note: This is rare; migrations are additive and rolled back automatically)
 docker compose exec api dotnet ef database update <previous-migration> \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 
 # 6. Verify
 docker compose ps
@@ -570,7 +570,7 @@ curl https://webhook.example.com/health/ready
 dotnet package search --exact
 
 # Check for npm updates
-cd frontend/webhook-spa && npm outdated
+cd frontend/hookbin-spa && npm outdated
 
 # Update with care and test thoroughly
 dotnet package update
@@ -579,7 +579,7 @@ npm update
 # Rebuild and test
 docker compose build
 dotnet test
-cd frontend/webhook-spa && npm test
+cd frontend/hookbin-spa && npm test
 ```
 
 ---
@@ -608,7 +608,7 @@ The API uses `.AsNoTracking()` on all SELECT queries for performance. If queries
 Token cache uses 5-minute sliding expiration:
 
 ```bash
-# View cache configuration (src/WebhookService.Infrastructure/Redis/RedisTokenCache.cs)
+# View cache configuration (src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs)
 # Current: IMemoryCache with 5-minute sliding expiry
 
 # To tune:
@@ -640,7 +640,7 @@ curl -X POST http://localhost:8088/webhook/<token> \
 Max 10 concurrent SSE connections per token (enforced in `SseNotifier`):
 
 ```bash
-# View the limit (src/WebhookService.Infrastructure/Sse/SseNotifier.cs)
+# View the limit (src/Hookbin.Infrastructure/Sse/SseNotifier.cs)
 # Current: const int MaxSubscribersPerToken = 10;
 
 # To change:

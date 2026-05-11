@@ -26,7 +26,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Unit tests
-        run: dotnet test tests/WebhookService.UnitTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=unit-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/Hookbin.UnitTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=unit-results.trx" --results-directory ./TestResults
 
       - name: Upload test results
         if: always()
@@ -51,10 +51,10 @@ jobs:
         run: dotnet restore
 
       - name: Build architecture tests
-        run: dotnet build tests/WebhookService.ArchitectureTests --configuration Release --no-restore
+        run: dotnet build tests/Hookbin.ArchitectureTests --configuration Release --no-restore
 
       - name: Run architecture tests
-        run: dotnet test tests/WebhookService.ArchitectureTests --no-build --configuration Release --logger "trx;LogFileName=arch-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/Hookbin.ArchitectureTests --no-build --configuration Release --logger "trx;LogFileName=arch-results.trx" --results-directory ./TestResults
 
       - name: Upload test results
         if: always()
@@ -83,7 +83,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Integration tests (Docker via Testcontainers)
-        run: dotnet test tests/WebhookService.IntegrationTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=integration-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/Hookbin.IntegrationTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=integration-results.trx" --results-directory ./TestResults
 
       - name: Upload test results
         if: always()
@@ -104,18 +104,18 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: frontend/webhook-spa/package-lock.json
+          cache-dependency-path: frontend/hookbin-spa/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend/webhook-spa
+        working-directory: frontend/hookbin-spa
         run: npm ci
 
       - name: Build
-        working-directory: frontend/webhook-spa
+        working-directory: frontend/hookbin-spa
         run: npm run build
 
       - name: Unit tests with coverage
-        working-directory: frontend/webhook-spa
+        working-directory: frontend/hookbin-spa
         run: npm test -- --watch=false --coverage
 
       - name: Upload coverage report
@@ -123,7 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage
-          path: frontend/webhook-spa/coverage/
+          path: frontend/hookbin-spa/coverage/
 
   e2e-test:
     name: E2E Tests
@@ -150,7 +150,7 @@ jobs:
         run: |
           cat > .env <<'EOF'
           SA_PASSWORD=Local!Dev_Sa_Pw_123
-          WEBHOOK_BASE_URL=http://localhost:8088
+          HOOKBIN_BASE_URL=http://localhost:8088
           RETENTION_DAYS=7
           MAX_REQUEST_SIZE_MB=5
           AUTH_USERNAME=admin
@@ -169,10 +169,10 @@ jobs:
           REBUILD_TIMEOUT_SECONDS: 180
 
       - name: Install Playwright browsers
-        run: pwsh tests/WebhookService.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+        run: pwsh tests/Hookbin.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       - name: Run E2E tests
-        run: dotnet test tests/WebhookService.E2ETests/ --no-build --configuration Release --logger "trx;LogFileName=e2e-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/Hookbin.E2ETests/ --no-build --configuration Release --logger "trx;LogFileName=e2e-results.trx" --results-directory ./TestResults
         env:
           E2E_BASE_URL: http://localhost:8088
           E2E_AUTH_USERNAME: admin
@@ -192,4 +192,4 @@ jobs:
           name: e2e-test-results
           path: |
             TestResults/
-            tests/WebhookService.E2ETests/bin/Release/net10.0/playwright-traces/
+            tests/Hookbin.E2ETests/bin/Release/net10.0/playwright-traces/

@@ -1,5 +1,5 @@
 {
-  "name": "Webhook Service Smoke Evals",
+  "name": "Hookbin Smoke Evals",
   "description": "Critical-path eval fixtures for token lifecycle and webhook receipt flows.",
   "cases": [
     {

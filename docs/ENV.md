@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-05-11
 
-This document describes all environment variables used by the Webhook Service. Copy `.env.example` to `.env` and configure before deployment.
+This document describes all environment variables used by the Hookbin. Copy `.env.example` to `.env` and configure before deployment.
 
 ---
 
@@ -11,7 +11,7 @@ This document describes all environment variables used by the Webhook Service. C
 ```bash
 # Required (no defaults)
 SA_PASSWORD=P@ssw0rd!SafeValue2024
-WEBHOOK_BASE_URL=http://localhost:8088
+HOOKBIN_BASE_URL=http://localhost:8088
 AUTH_PASSWORD_HASH=<generated-by-tools/RotatePassword>
 
 # Optional (defaults provided)
@@ -45,7 +45,7 @@ AUTH_SESSION_HOURS=8
 
 ## Webhook Configuration
 
-### `WEBHOOK_BASE_URL`
+### `HOOKBIN_BASE_URL`
 
 **Required:** Yes  
 **Default:** None (app refuses to start without it)  
@@ -58,7 +58,7 @@ AUTH_SESSION_HOURS=8
 
 **Notes:**
 - Do NOT include trailing slash
-- The full webhook URL is `{WEBHOOK_BASE_URL}/webhook/{guid}`
+- The full webhook URL is `{HOOKBIN_BASE_URL}/webhook/{guid}`
 - Changing this immediately affects URLs shown in the UI (recomputed at read time, not stored per-token)
 - Used by receivers to POST requests back; must be reachable from external callers
 
@@ -162,7 +162,7 @@ node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('YourSecurePassword123!
 
 ## Redis (Stream Worker)
 
-### `WEBHOOK_WORKER_ID`
+### `HOOKBIN_WORKER_ID`
 
 **Required:** No  
 **Default:** `stream-worker-1` (in docker-compose.yml)  
@@ -257,7 +257,7 @@ The application loads environment variables in this order (later overrides earli
 3. **.env file** — Environment variables from compose or manual source
 4. **Environment variables** — Shell/system environment (highest priority)
 
-**Example:** If `appsettings.json` sets `WEBHOOK_BASE_URL=http://localhost:5000` but `.env` sets `WEBHOOK_BASE_URL=http://localhost:8088`, the `.env` value wins.
+**Example:** If `appsettings.json` sets `HOOKBIN_BASE_URL=http://localhost:5000` but `.env` sets `HOOKBIN_BASE_URL=http://localhost:8088`, the `.env` value wins.
 
 ---
 
@@ -276,10 +276,10 @@ AUTH_PASSWORD_HASH=$2a$12$xyz...  # → becomes a$12$xyz... (broken)
 AUTH_PASSWORD_HASH='$2a$12$xyz...'
 
 # PROBLEM: Values with spaces need quotes
-WEBHOOK_BASE_URL=http://localhost with spaces  # → broken
+HOOKBIN_BASE_URL=http://localhost with spaces  # → broken
 
 # OK: Quoted
-WEBHOOK_BASE_URL="http://localhost/path"
+HOOKBIN_BASE_URL="http://localhost/path"
 ```
 
 **Rule of thumb:** Always quote values containing special characters (`$`, spaces, etc.).
@@ -292,7 +292,7 @@ WEBHOOK_BASE_URL="http://localhost/path"
 
 ```env
 SA_PASSWORD=Dev@12345!
-WEBHOOK_BASE_URL=http://localhost:8088
+HOOKBIN_BASE_URL=http://localhost:8088
 RETENTION_DAYS=7
 MAX_REQUEST_SIZE_MB=5
 AUTH_USERNAME=admin
@@ -305,7 +305,7 @@ CORS__AllowedOrigins=http://localhost:4200
 
 ```env
 SA_PASSWORD=P@ssw0rd!SecureValue2024WithSymbols
-WEBHOOK_BASE_URL=https://webhook.example.com
+HOOKBIN_BASE_URL=https://webhook.example.com
 RETENTION_DAYS=30
 MAX_REQUEST_SIZE_MB=10
 AUTH_USERNAME=webhook-admin
@@ -317,7 +317,7 @@ AUTH_SESSION_HOURS=8
 
 ```env
 SA_PASSWORD=Staging!P@ss2024
-WEBHOOK_BASE_URL=https://abc123def456.ngrok.app
+HOOKBIN_BASE_URL=https://abc123def456.ngrok.app
 RETENTION_DAYS=7
 MAX_REQUEST_SIZE_MB=5
 AUTH_USERNAME=staging-admin
@@ -334,7 +334,7 @@ The application validates the following at startup:
 
 | Variable | Check | Failure Behavior |
 |----------|-------|------------------|
-| `WEBHOOK_BASE_URL` | Not empty | App refuses to start; logs `ValidateOptionsResult.Fail` |
+| `HOOKBIN_BASE_URL` | Not empty | App refuses to start; logs `ValidateOptionsResult.Fail` |
 | `AUTH_PASSWORD_HASH` | Starts with `$2` | App refuses to start; logs `The configured password does not match...` |
 | `SA_PASSWORD` | Meets complexity (8+ chars, upper/lower/number/symbol) | SQL Server container exits; logs error |
 | `RETENTION_DAYS` | Integer > 0 | App refuses to start |
@@ -349,9 +349,9 @@ If any validation fails, the application will not start. Check logs and fix the 
 | Mistake | Impact | Fix |
 |---------|--------|-----|
 | `AUTH_PASSWORD_HASH` is plaintext | App won't start; "does not match expected format" | Generate BCrypt hash with `tools/RotatePassword` |
-| `WEBHOOK_BASE_URL=http://localhost:8088/` (trailing slash) | URLs generated as `/webhook/{guid}/` | Remove the trailing slash |
+| `HOOKBIN_BASE_URL=http://localhost:8088/` (trailing slash) | URLs generated as `/webhook/{guid}/` | Remove the trailing slash |
 | `SA_PASSWORD=weak` (no symbols) | SQL Server container exits | Use 8+ chars with upper/lower/number/symbol |
-| `WEBHOOK_BASE_URL` not set | App won't start | Set to public-facing URL (even for dev, use `http://localhost:8088`) |
+| `HOOKBIN_BASE_URL` not set | App won't start | Set to public-facing URL (even for dev, use `http://localhost:8088`) |
 | `AUTH_PASSWORD_HASH=$2a$12$...` (unquoted in .env) | Hash corrupted ($ interpolated) | Quote: `AUTH_PASSWORD_HASH='$2a$12$...'` |
 | Different `AUTH_PASSWORD_HASH` on frontend vs backend | Login always fails | Ensure both use same hash from `tools/RotatePassword` |
 
@@ -379,7 +379,7 @@ Environment variables loaded from:
 # Set env vars before running
 export WEBHOOK__BaseUrl=http://localhost:8080
 export ASPNETCORE_ENVIRONMENT=Development
-dotnet run --project src/WebhookService.API
+dotnet run --project src/Hookbin.API
 ```
 
 ### Kubernetes Deployment
@@ -387,7 +387,7 @@ dotnet run --project src/WebhookService.API
 In a Kubernetes manifest, use:
 ```yaml
 env:
-  - name: WEBHOOK_BASE_URL
+  - name: HOOKBIN_BASE_URL
     value: "https://webhook.example.com"
   - name: AUTH_PASSWORD_HASH
     valueFrom:
@@ -424,11 +424,11 @@ dotnet run --project tools/RotatePassword -- --password "YourPassword123!"
 
 ### "Webhook:BaseUrl must not be empty"
 
-`WEBHOOK_BASE_URL` is not set.
+`HOOKBIN_BASE_URL` is not set.
 
 ```bash
 # Add to .env
-WEBHOOK_BASE_URL=http://localhost:8088
+HOOKBIN_BASE_URL=http://localhost:8088
 
 # Restart
 docker compose up -d

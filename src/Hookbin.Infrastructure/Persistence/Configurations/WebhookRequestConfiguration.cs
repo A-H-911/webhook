@@ -1,0 +1,42 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Hookbin.Domain.Entities;
+
+namespace Hookbin.Infrastructure.Persistence.Configurations;
+
+public sealed class WebhookRequestConfiguration : IEntityTypeConfiguration<WebhookRequest>
+{
+    public void Configure(EntityTypeBuilder<WebhookRequest> builder)
+    {
+        builder.ToTable("WebhookRequests");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.Method).HasMaxLength(10).IsRequired();
+        builder.Property(r => r.Path).HasMaxLength(2048).IsRequired();
+        builder.Property(r => r.QueryString).HasMaxLength(4000); // SQL Server nvarchar max fixed length is 4000
+        builder.Property(r => r.ContentType).HasMaxLength(256);
+        builder.Property(r => r.IpAddress).HasMaxLength(45).IsRequired();
+        builder.Property(r => r.UserAgent).HasMaxLength(512);
+        builder.Property(r => r.ReceivedAt).IsRequired().HasColumnType("datetimeoffset(7)");
+        builder.Property(r => r.Note).HasMaxLength(2000);
+        builder.Property(r => r.IpCountry).HasMaxLength(2);
+
+        builder.HasIndex(r => new { r.TokenId, r.Method, r.ReceivedAt })
+               .IsDescending(false, false, true)
+               .HasDatabaseName("IX_WebhookRequests_TokenId_Method_ReceivedAt");
+
+        builder.HasIndex(r => new { r.TokenId, r.ResponseStatusCode, r.ReceivedAt })
+               .IsDescending(false, false, true)
+               .HasDatabaseName("IX_WebhookRequests_TokenId_ResponseStatusCode_ReceivedAt");
+
+        builder.HasIndex(r => new { r.TokenId, r.ReceivedAt, r.Id })
+               .IsDescending(false, true, true)
+               .HasDatabaseName("IX_WebhookRequests_TokenId_ReceivedAt_Id")
+               .IncludeProperties(r => new { r.Method, r.Path, r.SizeBytes, r.IpAddress, r.ContentType });
+
+        builder.HasOne(r => r.Token)
+               .WithMany()
+               .HasForeignKey(r => r.TokenId)
+               .OnDelete(DeleteBehavior.Cascade);
+    }
+}

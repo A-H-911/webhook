@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-05-11 (architecture tests added as fourth test tier)
 
-This guide explains how to set up the development environment, run tests, and submit pull requests to the Webhook Service project.
+This guide explains how to set up the development environment, run tests, and submit pull requests to the Hookbin project.
 
 ---
 
@@ -55,7 +55,7 @@ Edit `.env`:
 
 ```env
 SA_PASSWORD=Dev@12345!
-WEBHOOK_BASE_URL=http://localhost:8088
+HOOKBIN_BASE_URL=http://localhost:8088
 RETENTION_DAYS=7
 MAX_REQUEST_SIZE_MB=5
 AUTH_USERNAME=admin
@@ -103,7 +103,7 @@ Reformats all `.cs` files to project style. Run this before committing.
 ### Run Architecture Tests (no Docker required)
 
 ```bash
-dotnet test tests/WebhookService.ArchitectureTests/
+dotnet test tests/Hookbin.ArchitectureTests/
 ```
 
 Or use the cross-OS scripts:
@@ -121,7 +121,7 @@ bash scripts/run-arch-tests.sh
 ### Run Unit Tests (no Docker required)
 
 ```bash
-dotnet test tests/WebhookService.UnitTests/
+dotnet test tests/Hookbin.UnitTests/
 ```
 
 Fast feedback loop — domain logic, CQRS handlers, in-memory services. ~310 tests, takes ~10 seconds.
@@ -129,7 +129,7 @@ Fast feedback loop — domain logic, CQRS handlers, in-memory services. ~310 tes
 ### Run Integration Tests (Docker required)
 
 ```bash
-dotnet test tests/WebhookService.IntegrationTests/
+dotnet test tests/Hookbin.IntegrationTests/
 ```
 
 Testcontainers pulls a SQL Server 2022 container automatically. Ensure Docker is running. ~59 tests, takes ~60 seconds.
@@ -160,8 +160,8 @@ When working on database changes:
 
 ```bash
 dotnet ef migrations add <DescriptiveName> \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 ```
 
 Review the generated migration file. Destructive changes (drops, renames) require manual safety review before committing.
@@ -170,8 +170,8 @@ Apply to local database:
 
 ```bash
 dotnet ef database update \
-  --project src/WebhookService.Infrastructure \
-  --startup-project src/WebhookService.API
+  --project src/Hookbin.Infrastructure \
+  --startup-project src/Hookbin.API
 ```
 
 ### Run the API Locally
@@ -185,14 +185,14 @@ docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=Dev@12345!" \
 
 # Build and run the API
 dotnet build
-dotnet run --project src/WebhookService.API
+dotnet run --project src/Hookbin.API
 ```
 
 API listens on `http://localhost:8080`. Configure `appsettings.Development.json` or set `WEBHOOK__BaseUrl`:
 
 ```bash
 export WEBHOOK__BaseUrl=http://localhost:8080
-dotnet run --project src/WebhookService.API
+dotnet run --project src/Hookbin.API
 ```
 
 ---
@@ -202,7 +202,7 @@ dotnet run --project src/WebhookService.API
 ### Install Dependencies
 
 ```bash
-cd frontend/webhook-spa
+cd frontend/hookbin-spa
 npm install
 ```
 
@@ -266,7 +266,7 @@ All tests must pass before submitting a PR.
 ### Architecture Tests (Fastest — 1 second)
 
 ```bash
-dotnet test tests/WebhookService.ArchitectureTests/
+dotnet test tests/Hookbin.ArchitectureTests/
 ```
 
 **When architecture tests fail:**
@@ -274,18 +274,18 @@ dotnet test tests/WebhookService.ArchitectureTests/
 - A command is a `class` instead of a `sealed record`
 - A handler is `public` instead of `internal sealed`
 - A source file's folder path doesn't match its CLR namespace
-- `WebhookService.Domain` accidentally references an outer layer
+- `Hookbin.Domain` accidentally references an outer layer
 
-**Intentionally breaking a rule?** Update the corresponding test file in `tests/WebhookService.ArchitectureTests/` in the same PR. The test failure is the early-warning system.
+**Intentionally breaking a rule?** Update the corresponding test file in `tests/Hookbin.ArchitectureTests/` in the same PR. The test failure is the early-warning system.
 
 ### Unit Tests (Fast — 10 seconds)
 
 ```bash
 # Backend
-dotnet test tests/WebhookService.UnitTests/
+dotnet test tests/Hookbin.UnitTests/
 
 # Frontend
-cd frontend/webhook-spa && npm test
+cd frontend/hookbin-spa && npm test
 ```
 
 **When to add unit tests:**
@@ -297,7 +297,7 @@ cd frontend/webhook-spa && npm test
 ### Integration Tests (Medium — 60 seconds)
 
 ```bash
-dotnet test tests/WebhookService.IntegrationTests/
+dotnet test tests/Hookbin.IntegrationTests/
 ```
 
 **When to add integration tests:**
@@ -315,13 +315,13 @@ dotnet test tests/WebhookService.IntegrationTests/
 dotnet build
 
 # Step 2: Install Playwright browsers (first run only)
-pwsh tests/WebhookService.E2ETests/bin/Debug/net10.0/playwright.ps1 install
+pwsh tests/Hookbin.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 
 # Step 3: Start the full stack
 docker compose up -d
 
 # Step 4: Run E2E tests
-E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
 ```
 
 Or use the rebuild script (recommended):
@@ -333,7 +333,7 @@ pwsh scripts/rebuild-and-wait.ps1
 Then run tests:
 
 ```bash
-E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
 ```
 
 **When to add E2E tests:**
@@ -348,10 +348,10 @@ All checks run automatically on push and pull request:
 ```bash
 # GitHub Actions workflow — .github/workflows/ci.yml
 
-build-and-test     (parallel) — dotnet test tests/WebhookService.UnitTests/ + build
-architecture-test  (parallel) — dotnet test tests/WebhookService.ArchitectureTests/ [<60s, no Docker]
+build-and-test     (parallel) — dotnet test tests/Hookbin.UnitTests/ + build
+architecture-test  (parallel) — dotnet test tests/Hookbin.ArchitectureTests/ [<60s, no Docker]
 frontend           (parallel) — npm run build + npm test --coverage
-integration-test   (after build-and-test) — dotnet test tests/WebhookService.IntegrationTests/
+integration-test   (after build-and-test) — dotnet test tests/Hookbin.IntegrationTests/
 e2e-test           (after build-and-test + frontend) — full stack + Playwright
 ```
 
@@ -444,21 +444,21 @@ Before submitting a PR, verify:
 - [ ] **Code formatted:** `dotnet format` applied (backend); Prettier run (frontend)
 - [ ] **Architecture tests pass:** No layer violations or CQRS convention breaks
   ```bash
-  dotnet test tests/WebhookService.ArchitectureTests/
+  dotnet test tests/Hookbin.ArchitectureTests/
   ```
 - [ ] **Unit tests added/updated:** All new logic covered; existing tests still pass
   ```bash
-  dotnet test tests/WebhookService.UnitTests/
-  cd frontend/webhook-spa && npm test
+  dotnet test tests/Hookbin.UnitTests/
+  cd frontend/hookbin-spa && npm test
   ```
 - [ ] **Integration tests run:** If touching API/database
   ```bash
-  dotnet test tests/WebhookService.IntegrationTests/
+  dotnet test tests/Hookbin.IntegrationTests/
   ```
 - [ ] **E2E tests pass:** If touching user workflows
   ```bash
   pwsh scripts/rebuild-and-wait.ps1
-  E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/
+  E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
   ```
 - [ ] **API contract updated:** If adding/changing endpoints
   - Update README.md §7.3 API Contract table
@@ -486,19 +486,19 @@ Before submitting a PR, verify:
 See CLAUDE.md "Feature Recipe: Adding a CQRS Command" for the full pattern.
 
 **Quick checklist:**
-1. Create `src/WebhookService.Application/<Feature>/Commands/<Name>/`
+1. Create `src/Hookbin.Application/<Feature>/Commands/<Name>/`
 2. Add `<Name>Command.cs` (`sealed record` implementing `IRequest<T>`)
 3. Add `<Name>CommandHandler.cs` (`internal sealed class` implementing `IRequestHandler`)
 4. Add `<Name>CommandValidator.cs` (`public sealed class` extending `AbstractValidator`)
 5. Add controller action in appropriate controller
-6. Add unit tests in `tests/WebhookService.UnitTests/Application/`
-7. **Verify architecture tests pass:** `dotnet test tests/WebhookService.ArchitectureTests/`
+6. Add unit tests in `tests/Hookbin.UnitTests/Application/`
+7. **Verify architecture tests pass:** `dotnet test tests/Hookbin.ArchitectureTests/`
    - Fails if command is not `sealed record`, handler is not `internal sealed`, validator doesn't extend `AbstractValidator`, or folder/namespace drifts
 
 ### Adding a Query Handler
 
 Same pattern as commands:
-1. Create `src/WebhookService.Application/<Feature>/Queries/<Name>/`
+1. Create `src/Hookbin.Application/<Feature>/Queries/<Name>/`
 2. Add `<Name>Query.cs` (record: `IRequest<TResult>`)
 3. Add `<Name>QueryHandler.cs` (implements `IRequestHandler<,TResult>`)
 4. Validator is optional for read-only queries
@@ -510,15 +510,15 @@ Same pattern as commands:
 2. Run:
    ```bash
    dotnet ef migrations add DescriptiveName \
-     --project src/WebhookService.Infrastructure \
-     --startup-project src/WebhookService.API
+     --project src/Hookbin.Infrastructure \
+     --startup-project src/Hookbin.API
    ```
-3. Review the generated migration in `src/WebhookService.Infrastructure/Persistence/Migrations/`
+3. Review the generated migration in `src/Hookbin.Infrastructure/Persistence/Migrations/`
 4. If destructive (drops/renames), add manual safety checks
 5. Test locally:
    ```bash
    dotnet ef database update
-   dotnet test tests/WebhookService.IntegrationTests/
+   dotnet test tests/Hookbin.IntegrationTests/
    ```
 6. Commit both the migration and your code changes together
 

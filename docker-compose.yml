@@ -1,4 +1,4 @@
-name: webhook-service
+name: hookbin
 
 services:
 
@@ -31,7 +31,7 @@ services:
       retries: 12
       start_period: 45s
     networks:
-      - webhook-net
+      - hookbin-net
 
   seq:
     image: datalust/seq:latest
@@ -43,7 +43,7 @@ services:
     volumes:
       - seq-data:/data
     networks:
-      - webhook-net
+      - hookbin-net
 
   redis:
     image: redis:7-alpine
@@ -56,14 +56,14 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - webhook-net
+      - hookbin-net
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        PROJECT_NAME: WebhookService.API
+        PROJECT_NAME: Hookbin.API
     ports:
       - "8080:8080"
     environment:
@@ -73,9 +73,9 @@ services:
       ConnectionStrings__Redis: "redis:6379"
       Serilog__WriteTo__1__Name: "Seq"
       Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
-      Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
-      Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
-      Webhook__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
+      Hookbin__BaseUrl: "${HOOKBIN_BASE_URL}"
+      Hookbin__RetentionDays: "${RETENTION_DAYS:-7}"
+      Hookbin__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
       Auth__Username: "${AUTH_USERNAME}"
       Auth__PasswordHash: "${AUTH_PASSWORD_HASH}"
       Auth__SessionHours: "${AUTH_SESSION_HOURS:-8}"
@@ -94,15 +94,15 @@ services:
       retries: 12
       start_period: 30s
     networks:
-      - webhook-net
+      - hookbin-net
 
   stream-worker:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        PROJECT_NAME: WebhookService.StreamWorker
-    container_name: webhook-stream-worker
+        PROJECT_NAME: Hookbin.StreamWorker
+    container_name: hookbin-stream-worker
     hostname: stream-worker-1
     depends_on:
       sqlserver:
@@ -116,12 +116,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: "Production"
       ASPNETCORE_HTTP_PORTS: "8080"
-      WEBHOOK_WORKER_ID: "stream-worker-1"
+      HOOKBIN_WORKER_ID: "stream-worker-1"
       ConnectionStrings__WebhookDb: "Server=sqlserver;Database=WebhookDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True"
       ConnectionStrings__Redis: "redis:6379"
-      Webhook__BaseUrl: "${WEBHOOK_BASE_URL}"
-      Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
-      Webhook__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
+      Hookbin__BaseUrl: "${HOOKBIN_BASE_URL}"
+      Hookbin__RetentionDays: "${RETENTION_DAYS:-7}"
+      Hookbin__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-5}"
       Serilog__MinimumLevel__Default: "Information"
       Serilog__WriteTo__1__Name: "Seq"
       Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
@@ -132,7 +132,7 @@ services:
       retries: 12
       start_period: 30s
     networks:
-      - webhook-net
+      - hookbin-net
     restart: unless-stopped
 
   jobs-worker:
@@ -140,8 +140,8 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        PROJECT_NAME: WebhookService.JobsWorker
-    container_name: webhook-jobs-worker
+        PROJECT_NAME: Hookbin.JobsWorker
+    container_name: hookbin-jobs-worker
     hostname: jobs-worker-1
     deploy:
       replicas: 1
@@ -157,7 +157,7 @@ services:
       ASPNETCORE_HTTP_PORTS: "8080"
       ConnectionStrings__WebhookDb: "Server=sqlserver;Database=WebhookDb;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=True"
       ConnectionStrings__Redis: "redis:6379"
-      Webhook__RetentionDays: "${RETENTION_DAYS:-7}"
+      Hookbin__RetentionDays: "${RETENTION_DAYS:-7}"
       Serilog__MinimumLevel__Default: "Information"
       Serilog__WriteTo__1__Name: "Seq"
       Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
@@ -168,7 +168,7 @@ services:
       retries: 12
       start_period: 30s
     networks:
-      - webhook-net
+      - hookbin-net
     restart: unless-stopped
 
   frontend:
@@ -180,12 +180,12 @@ services:
     depends_on:
       - api
     networks:
-      - webhook-net
+      - hookbin-net
 
 volumes:
   sqlserver-data:
   seq-data:
 
 networks:
-  webhook-net:
+  hookbin-net:
     driver: bridge
