@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura,opencover</Format>
+          <Threshold>80</Threshold>
+          <ThresholdType>line,method</ThresholdType>
+          <ThresholdStat>total</ThresholdStat>
+          <Exclude>[*]*.Migrations.*,[*]Program,[xunit.*]*</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

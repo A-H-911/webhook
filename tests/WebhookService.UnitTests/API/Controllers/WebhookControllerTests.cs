@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using NSubstitute;
 using System.Text;
 using WebhookService.API.Controllers;
@@ -34,6 +36,38 @@ public sealed class WebhookControllerTests
         httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("127.0.0.1");
         httpContext.Response.Body = new MemoryStream();
 
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        return controller;
+    }
+
+    private WebhookController CreateFormController(Dictionary<string, StringValues> formData, long contentLength = 1)
+    {
+        var controller = new WebhookController(_tokenRepo, _queuePublisher, _tokenCache, _logger);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Method = "POST";
+        httpContext.Request.ContentType = "application/x-www-form-urlencoded";
+        httpContext.Request.ContentLength = contentLength;
+        httpContext.Request.Path = "/webhook/test";
+        httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("127.0.0.1");
+        httpContext.Response.Body = new MemoryStream();
+        // Pre-populate the form cache so ReadFormAsync returns immediately without reading the body stream.
+        // This mirrors the antiforgery filter's side effect: the form is already parsed by the time the action runs.
+        httpContext.Features.Set<IFormFeature>(new FormFeature(new FormCollection(formData)));
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        return controller;
+    }
+
+    private WebhookController CreateBinaryController(byte[] body, string contentType = "application/octet-stream")
+    {
+        var controller = new WebhookController(_tokenRepo, _queuePublisher, _tokenCache, _logger);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Method = "POST";
+        httpContext.Request.Body = new MemoryStream(body);
+        httpContext.Request.ContentLength = body.Length;
+        httpContext.Request.ContentType = contentType;
+        httpContext.Request.Path = "/webhook/test";
+        httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("127.0.0.1");
+        httpContext.Response.Body = new MemoryStream();
         controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
         return controller;
     }
@@ -393,6 +427,164 @@ public sealed class WebhookControllerTests
             .WithMessage("*Could not read request body*");
     }
 
+    // ── ReadBodyAsync form-encoded path ──────────────────────────────────────
+
+    [Fact]
+    public async Task Receive_CapturesFormEncodedBody_AsUrlEncodedString()
+    {
+        // Arrange
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        WebhookRequest? captured = null;
+        await _queuePublisher.PublishAsync(Arg.Do<WebhookRequest>(r => captured = r), Arg.Any<CancellationToken>());
+        var formData = new Dictionary<string, StringValues>
+        {
+            ["username"] = "john",
+            ["role"] = "admin"
+        };
+        var controller = CreateFormController(formData);
+
+        // Act
+        await controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert
+        captured.Should().NotBeNull();
+        captured!.Body.Should().Be("username=john&role=admin");
+        captured.IsBodyBase64.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Receive_CapturesFormEncodedBody_WithSpecialChars_EscapedRoundTrip()
+    {
+        // Arrange — email address contains @ which must be percent-encoded
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        WebhookRequest? captured = null;
+        await _queuePublisher.PublishAsync(Arg.Do<WebhookRequest>(r => captured = r), Arg.Any<CancellationToken>());
+        var formData = new Dictionary<string, StringValues> { ["email"] = "john@example.com" };
+        var controller = CreateFormController(formData);
+
+        // Act
+        await controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert — @ must be percent-encoded; body is round-trippable via Uri.UnescapeDataString
+        captured.Should().NotBeNull();
+        captured!.Body.Should().Be("email=john%40example.com");
+        Uri.UnescapeDataString(captured.Body!.Split('=')[1]).Should().Be("john@example.com");
+    }
+
+    [Fact]
+    public async Task Receive_CapturesFormEncodedBody_MultiValueKey_JoinsCommaSeparated()
+    {
+        // Arrange — repeated key becomes comma-joined then percent-encoded
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        WebhookRequest? captured = null;
+        await _queuePublisher.PublishAsync(Arg.Do<WebhookRequest>(r => captured = r), Arg.Any<CancellationToken>());
+        var formData = new Dictionary<string, StringValues>
+        {
+            ["tag"] = new StringValues(["red", "blue"])
+        };
+        var controller = CreateFormController(formData);
+
+        // Act
+        await controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert — comma is percent-encoded (%2C) because it is joined first then escaped
+        captured.Should().NotBeNull();
+        captured!.Body.Should().Be("tag=red%2Cblue");
+    }
+
+    [Fact]
+    public async Task Receive_CapturesFormEncoded_EmptyForm_ReturnsNullBody()
+    {
+        // Arrange — empty form collection (e.g. malformed or stripped body)
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        WebhookRequest? captured = null;
+        await _queuePublisher.PublishAsync(Arg.Do<WebhookRequest>(r => captured = r), Arg.Any<CancellationToken>());
+        var controller = CreateFormController(new Dictionary<string, StringValues>());
+
+        // Act
+        await controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert — empty form collection → body stored as null
+        captured.Should().NotBeNull();
+        captured!.Body.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Receive_CapturesBinaryBody_AsBase64()
+    {
+        // Arrange — byte sequence that is not valid UTF-8
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        WebhookRequest? captured = null;
+        await _queuePublisher.PublishAsync(Arg.Do<WebhookRequest>(r => captured = r), Arg.Any<CancellationToken>());
+        var binaryBytes = new byte[] { 0xFF, 0xFE, 0xFD };
+        var controller = CreateBinaryController(binaryBytes);
+
+        // Act
+        await controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert — falls back to Base64 when UTF-8 decode fails
+        captured.Should().NotBeNull();
+        captured!.IsBodyBase64.Should().BeTrue();
+        captured.Body.Should().Be(Convert.ToBase64String(binaryBytes));
+    }
+
+    [Fact]
+    public async Task Receive_CapturesPlainText_AsUtf8()
+    {
+        // Arrange — non-ASCII but valid UTF-8 text
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        WebhookRequest? captured = null;
+        await _queuePublisher.PublishAsync(Arg.Do<WebhookRequest>(r => captured = r), Arg.Any<CancellationToken>());
+        const string text = "héllo wörld";
+        var controller = CreateController(body: text, contentType: "text/plain; charset=utf-8");
+
+        // Act
+        await controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert — multibyte UTF-8 text captured as-is without base64 encoding
+        captured.Should().NotBeNull();
+        captured!.Body.Should().Be(text);
+        captured.IsBodyBase64.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Receive_FormBodyThrowsIOException_Returns400()
+    {
+        // Arrange — ThrowingFormFeature simulates a stream that fails mid-read
+        var token = MakeActiveToken();
+        _tokenRepo.GetByTokenIncludingInactiveAsync(token.Token, Arg.Any<CancellationToken>())
+            .Returns(token);
+        var controller = new WebhookController(_tokenRepo, _queuePublisher, _tokenCache, _logger);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Method = "POST";
+        httpContext.Request.ContentType = "application/x-www-form-urlencoded";
+        httpContext.Request.ContentLength = 10;
+        httpContext.Request.Path = "/webhook/test";
+        httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Loopback;
+        httpContext.Response.Body = new MemoryStream();
+        httpContext.Features.Set<IFormFeature>(new ThrowingFormFeature());
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+
+        // Act
+        var act = () => controller.Receive(token.Token, CancellationToken.None);
+
+        // Assert — IOException on form read is translated to 400 BadHttpRequestException
+        await act.Should().ThrowAsync<BadHttpRequestException>()
+            .WithMessage("*Could not read request body*");
+    }
+
     // ── SseEvent domain record ────────────────────────────────────────────────
 
     [Fact]
@@ -443,4 +635,21 @@ file sealed class ThrowingStream : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+}
+
+/// <summary>
+/// An <see cref="IFormFeature"/> that throws <see cref="IOException"/> on every read,
+/// used to exercise the form-read catch block in WebhookController.ReadBodyAsync.
+/// </summary>
+file sealed class ThrowingFormFeature : IFormFeature
+{
+    public bool HasFiles => false;
+    public bool IsLoadingForm => false;
+    public bool HasFormContentType => true;
+    public IFormCollection? Form { get => null; set { } }
+
+    public IFormCollection ReadForm() => FormCollection.Empty;
+
+    public Task<IFormCollection> ReadFormAsync(CancellationToken cancellationToken)
+        => Task.FromException<IFormCollection>(new IOException("Simulated form read failure"));
 }

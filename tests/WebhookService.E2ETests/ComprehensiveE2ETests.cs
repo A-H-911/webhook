@@ -585,3 +585,307 @@ public sealed class CustomResponseFlowE2ETests(DashboardE2EFixture fixture)
         await Assertions.Expect(page.Locator(".custom-badge")).ToBeVisibleAsync();
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. New Feature E2E — form body, processing time, notes, SSE live, threat links,
+//    export, delete + clear lifecycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+[Collection("ComprehensiveE2E")]
+public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
+{
+    private static string BaseUrl => DashboardE2EFixture.BaseUrl;
+    private HttpClient Api => fixture.ApiClient;
+    private Task<IPage> NewPageAsync() => fixture.AuthContext.NewPageAsync();
+
+    private async Task<(string id, string webhookPath)> CreateAsync(string desc)
+    {
+        var r = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        r.EnsureSuccessStatusCode();
+        var j = await r.Content.ReadFromJsonAsync<JsonElement>();
+        var id = j.GetProperty("id").GetString()!;
+        var url = j.GetProperty("webhookUrl").GetString()!;
+        return (id, new Uri(url).AbsolutePath);
+    }
+
+    private async Task<JsonElement> WaitForRequestsAsync(
+        string tokenId, int expectedCount = 1, int timeoutMs = 8_000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        var delay = 150;
+        while (true)
+        {
+            var resp = await Api.GetAsync($"/api/tokens/{tokenId}/requests");
+            resp.EnsureSuccessStatusCode();
+            var j = await resp.Content.ReadFromJsonAsync<JsonElement>();
+            if (j.GetProperty("total").GetInt32() >= expectedCount)
+                return j;
+            if (DateTime.UtcNow >= deadline)
+                return j;
+            await Task.Delay(delay);
+            delay = Math.Min(delay * 2, 1_000);
+        }
+    }
+
+    [Fact]
+    public async Task FormEncodedRequest_DisplaysFormValuesTable()
+    {
+        var (id, path) = await CreateAsync("form-values-e2e");
+
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["username"] = "alice",
+            ["role"] = "admin",
+        });
+        await Api.PostAsync(path, content);
+
+        await WaitForRequestsAsync(id);
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            await page.Locator(".request-row").First.ClickAsync();
+            await page.WaitForSelectorAsync(".detail-content", new() { Timeout = 5_000 });
+
+            // Form Values section renders a kv-table with the parsed entries
+            await page.WaitForSelectorAsync(".kv-table", new() { Timeout = 5_000 });
+            var tableText = await page.Locator(".kv-table").Last.InnerTextAsync();
+            Assert.Contains("username", tableText);
+            Assert.Contains("alice", tableText);
+        }
+        finally { await page.CloseAsync(); }
+    }
+
+    [Fact]
+    public async Task ProcessingTimeMs_IsDisplayedAfterStreamWorker()
+    {
+        var (id, path) = await CreateAsync("proc-time-e2e");
+        await Api.PostAsync(path, new StringContent("{}", Encoding.UTF8, "application/json"));
+
+        // Poll until stream worker sets processingTimeMs (up to 10 s)
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        string? reqId = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            var listJ = await WaitForRequestsAsync(id, timeoutMs: 2_000);
+            if (listJ.GetProperty("total").GetInt32() > 0)
+            {
+                reqId = listJ.GetProperty("items")[0].GetProperty("id").GetString()!;
+                var detailJ = await (await Api.GetAsync($"/api/tokens/{id}/requests/{reqId}"))
+                    .Content.ReadFromJsonAsync<JsonElement>();
+                if (detailJ.TryGetProperty("processingTimeMs", out var ptProp) &&
+                    ptProp.ValueKind != JsonValueKind.Null)
+                    break;
+            }
+            await Task.Delay(500);
+        }
+        Assert.NotNull(reqId);
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            await page.Locator(".request-row").First.ClickAsync();
+            await page.WaitForSelectorAsync(".detail-content", new() { Timeout = 5_000 });
+
+            // Pipeline row only renders when processingTimeMs is non-null
+            await page.WaitForSelectorAsync(".detail-grid span:has-text(' ms')",
+                new() { Timeout = 5_000 });
+            var ptText = await page.Locator(".detail-grid span:has-text(' ms')").InnerTextAsync();
+            Assert.Matches(@"\d+ ms", ptText);
+        }
+        finally { await page.CloseAsync(); }
+    }
+
+    [Fact]
+    public async Task Notes_AddEditClearLifecycle()
+    {
+        var (id, path) = await CreateAsync("notes-e2e");
+        await Api.PostAsync(path, new StringContent(""));
+        await WaitForRequestsAsync(id);
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            await page.Locator(".request-row").First.ClickAsync();
+            await page.WaitForSelectorAsync(".detail-content", new() { Timeout = 5_000 });
+
+            // Initially shows placeholder
+            await page.WaitForSelectorAsync(".note-view", new() { Timeout = 5_000 });
+            var notePlaceholder = await page.Locator(".note-placeholder").InnerTextAsync();
+            Assert.Contains("note", notePlaceholder.ToLowerInvariant());
+
+            // Enter edit mode
+            await page.Locator(".note-view").ClickAsync();
+            await page.WaitForSelectorAsync(".note-textarea", new() { Timeout = 3_000 });
+
+            // Type and save
+            const string noteText = "E2E test note — lifecycle";
+            await page.FillAsync(".note-textarea", noteText);
+            await page.Locator("button:has-text('Save')").ClickAsync();
+
+            // Saved text must appear in view mode
+            await page.WaitForSelectorAsync(".note-text", new() { Timeout = 5_000 });
+            var savedText = await page.Locator(".note-text").InnerTextAsync();
+            Assert.Equal(noteText, savedText.Trim());
+
+            // Edit again — clear the note
+            await page.Locator(".note-view").ClickAsync();
+            await page.WaitForSelectorAsync(".note-textarea", new() { Timeout = 3_000 });
+            await page.FillAsync(".note-textarea", "");
+            await page.Locator("button:has-text('Save')").ClickAsync();
+
+            // Placeholder must reappear
+            await page.WaitForSelectorAsync(".note-placeholder", new() { Timeout = 5_000 });
+        }
+        finally { await page.CloseAsync(); }
+    }
+
+    [Fact]
+    public async Task CustomResponse_DialogSavesAndApplies()
+    {
+        var (id, path) = await CreateAsync("cr-dialog-e2e");
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+
+            // Open custom response dialog
+            var responseBtn = page.GetByRole(AriaRole.Button,
+                new() { NameRegex = new Regex("Response", RegexOptions.IgnoreCase) });
+            await responseBtn.ClickAsync(new LocatorClickOptions { Force = true });
+            await page.WaitForSelectorAsync("mat-dialog-container", new() { Timeout = 5_000 });
+
+            // Change status code to 201
+            await page.Locator("input[type='number']").FillAsync("201");
+
+            // Save
+            await page.Locator("mat-dialog-actions button[color='primary']").ClickAsync();
+            await page.WaitForSelectorAsync("mat-dialog-container",
+                new() { State = WaitForSelectorState.Hidden, Timeout = 3_000 });
+        }
+        finally { await page.CloseAsync(); }
+
+        // Verify the live webhook receiver now returns 201
+        var r = await Api.PostAsync(path, new StringContent(""));
+        Assert.Equal(201, (int)r.StatusCode);
+    }
+
+    [Fact]
+    public async Task SSE_NewRequestAppearsLive()
+    {
+        var (id, path) = await CreateAsync("sse-live-e2e");
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+            await page.WaitForSelectorAsync(".sse-dot.connected", new() { Timeout = 10_000 });
+
+            // List must be empty before the request
+            await Assertions.Expect(page.Locator(".list-empty")).ToBeVisibleAsync();
+
+            // Fire a webhook; row must appear via SSE without any page reload
+            await Api.PostAsync(path, new StringContent("{}"));
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".request-row").First).ToBeVisibleAsync();
+        }
+        finally { await page.CloseAsync(); }
+    }
+
+    [Fact]
+    public async Task ThreatLinks_AreRenderedWithCorrectTargetAndRel()
+    {
+        var (id, path) = await CreateAsync("threat-links-e2e");
+        await Api.PostAsync(path, new StringContent(""));
+        await WaitForRequestsAsync(id);
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            await page.Locator(".request-row").First.ClickAsync();
+            await page.WaitForSelectorAsync(".detail-content", new() { Timeout = 5_000 });
+
+            await page.WaitForSelectorAsync(".threat-links", new() { Timeout = 5_000 });
+            var links = page.Locator(".threat-links a");
+            var count = await links.CountAsync();
+            Assert.True(count >= 3, $"Expected at least 3 threat-intelligence links, got {count}");
+
+            for (var i = 0; i < count; i++)
+            {
+                var link = links.Nth(i);
+                Assert.Equal("_blank", await link.GetAttributeAsync("target"));
+                var rel = await link.GetAttributeAsync("rel") ?? "";
+                Assert.Contains("noopener", rel);
+            }
+        }
+        finally { await page.CloseAsync(); }
+    }
+
+    [Fact]
+    public async Task ExportJson_DownloadsValidJson()
+    {
+        var (id, path) = await CreateAsync("export-e2e");
+        await Api.PostAsync(path, new StringContent("{\"exported\":true}", Encoding.UTF8, "application/json"));
+        var listJ = await WaitForRequestsAsync(id);
+        var reqId = listJ.GetProperty("items")[0].GetProperty("id").GetString()!;
+
+        // Validate via the export API endpoint (no browser download interception needed)
+        var exportR = await Api.GetAsync($"/api/tokens/{id}/requests/{reqId}/export");
+        Assert.Equal(HttpStatusCode.OK, exportR.StatusCode);
+        Assert.Equal("application/json", exportR.Content.Headers.ContentType?.MediaType);
+
+        var exportBody = await exportR.Content.ReadAsStringAsync();
+        var exportJ = JsonDocument.Parse(exportBody);
+        Assert.Equal(reqId, exportJ.RootElement.GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task DeleteSingleThenClearAll_LeavesEmptyState()
+    {
+        var (id, path) = await CreateAsync("del-clear-e2e");
+
+        await Api.PostAsync(path, new StringContent("first"));
+        await Api.PostAsync(path, new StringContent("second"));
+        await WaitForRequestsAsync(id, expectedCount: 2);
+
+        var page = await NewPageAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+
+            // Delete the first row
+            await page.Locator(".request-row .row-action").First
+                .ClickAsync(new LocatorClickOptions { Force = true });
+            var confirmDel = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            await confirmDel.WaitForAsync(new() { Timeout = 5_000 });
+            await confirmDel.ClickAsync();
+
+            // Wait for exactly one row to remain
+            await Assertions.Expect(page.Locator(".request-row"))
+                .ToHaveCountAsync(1, new() { Timeout = 5_000 });
+
+            // Clear all remaining
+            await page.Locator("button[mat-stroked-button][color='warn']")
+                .ClickAsync(new LocatorClickOptions { Force = true });
+            var confirmClear = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            await confirmClear.WaitForAsync(new() { Timeout = 5_000 });
+            await confirmClear.ClickAsync();
+
+            await page.WaitForSelectorAsync(".list-empty", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".list-empty")).ToBeVisibleAsync();
+        }
+        finally { await page.CloseAsync(); }
+    }
+}

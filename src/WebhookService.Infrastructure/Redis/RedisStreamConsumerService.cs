@@ -132,7 +132,7 @@ internal sealed class RedisStreamConsumerService(
                 return;
             }
 
-            request.ProcessingTimeMs = (long)(DateTimeOffset.UtcNow - request.ReceivedAt).TotalMilliseconds;
+            request.ProcessingTimeMs = Math.Max(0L, (long)(DateTimeOffset.UtcNow - request.ReceivedAt).TotalMilliseconds);
 
             await PersistAsync(request, ct);
 

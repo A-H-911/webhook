@@ -421,6 +421,84 @@ public sealed class RedisStreamConsumerServiceTests
     }
 
     [Fact]
+    public async Task ProcessEntryAsync_ComputesProcessingTime_RelativeToReceivedAt()
+    {
+        // Arrange — ReceivedAt 2 seconds in the past; elapsed must be >= 2000 ms
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        var receivedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+        var request = new WebhookRequest
+        {
+            Id = Guid.NewGuid(), TokenId = Guid.NewGuid(), Method = "POST",
+            Headers = "{}", ContentType = "application/json", QueryString = string.Empty,
+            ReceivedAt = receivedAt, IpAddress = "127.0.0.1", UserAgent = string.Empty, SizeBytes = 0
+        };
+        var entry = new StreamEntry("6-1",
+            [new NameValueEntry("payload", JsonSerializer.Serialize(request))]);
+
+        long? captured = null;
+        repo.AddAsync(
+                Arg.Do<WebhookRequest>(r => captured = r.ProcessingTimeMs),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
+
+        // Act
+        await RunCycleAsync(BuildService(repo));
+
+        // Assert — must be >= 2000 ms (ReceivedAt is 2 s ago) and within a generous CI tolerance
+        captured.Should().NotBeNull();
+        captured.Should().BeGreaterThanOrEqualTo(2000, "ReceivedAt was 2 seconds in the past");
+        captured.Should().BeLessThan(120_000, "sanity: elapsed must not wrap or invert");
+    }
+
+    [Fact]
+    public async Task ProcessEntryAsync_NeverSetsNegativeProcessingTime_OnClockSkew()
+    {
+        // Arrange — ReceivedAt 10 seconds in the FUTURE to simulate clock skew;
+        //            without Math.Max(0,...) this would yield a large negative value.
+        var repo = Substitute.For<IWebhookRequestRepository>();
+        SetupBaseRedis();
+
+        var receivedAt = DateTimeOffset.UtcNow.AddSeconds(10);
+        var request = new WebhookRequest
+        {
+            Id = Guid.NewGuid(), TokenId = Guid.NewGuid(), Method = "POST",
+            Headers = "{}", ContentType = "application/json", QueryString = string.Empty,
+            ReceivedAt = receivedAt, IpAddress = "127.0.0.1", UserAgent = string.Empty, SizeBytes = 0
+        };
+        var entry = new StreamEntry("7-1",
+            [new NameValueEntry("payload", JsonSerializer.Serialize(request))]);
+
+        long? captured = null;
+        repo.AddAsync(
+                Arg.Do<WebhookRequest>(r => captured = r.ProcessingTimeMs),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var calls = 0;
+        _db.StreamReadGroupAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                Arg.Is<RedisValue>(v => v == (RedisValue)">"),
+                Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromResult(calls++ == 0 ? [entry] : Array.Empty<StreamEntry>()));
+
+        // Act
+        await RunCycleAsync(BuildService(repo));
+
+        // Assert — must be clamped to 0, never negative
+        captured.Should().NotBeNull();
+        captured.Should().Be(0, "ProcessingTimeMs must be clamped to 0 when ReceivedAt is in the future");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RedisConnectionExceptionInMainLoop_PausesAndContinues()
     {
         var repo = Substitute.For<IWebhookRequestRepository>();

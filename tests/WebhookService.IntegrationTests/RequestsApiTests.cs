@@ -281,6 +281,44 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
     }
 
     [Fact]
+    public async Task ExportRequest_CrossToken_Returns404()
+    {
+        // Request belongs to tokenA; queried under tokenB → must return 404 (IDOR guard)
+        var (tokenAId, webhookTokenA) = await CreateTokenAsync();
+        var (tokenBId, _) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookTokenA, "{\"owner\":\"a\"}");
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenAId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        // Attempt to export tokenA's request under tokenB's scope
+        var response = await _client.GetAsync($"/api/tokens/{tokenBId}/requests/{requestId}/export");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeleteRequest_CrossToken_Returns404_AndPreservesRow()
+    {
+        // Request belongs to tokenA; delete attempted under tokenB → 404, row untouched
+        var (tokenAId, webhookTokenA) = await CreateTokenAsync();
+        var (tokenBId, _) = await CreateTokenAsync();
+        await SendWebhookAsync(webhookTokenA, "{\"owner\":\"a\"}");
+
+        var list = await (await _client.GetAsync($"/api/tokens/{tokenAId}/requests"))
+            .Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        var requestId = list.GetProperty("items")[0].GetProperty("id").GetString();
+
+        // Attempt cross-token delete
+        var deleteResponse = await _client.DeleteAsync($"/api/tokens/{tokenBId}/requests/{requestId}");
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // Original row must still exist under the correct token
+        var detailResponse = await _client.GetAsync($"/api/tokens/{tokenAId}/requests/{requestId}");
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task GetRequests_SecondPage_ReturnsCorrectSubset()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();

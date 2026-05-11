@@ -256,6 +256,11 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 | Single test by name | `dotnet test --filter "FullyQualifiedName~<MethodName>"` |
 | E2E against docker compose stack | `E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/WebhookService.E2ETests/` |
 | Angular unit tests | `cd frontend/webhook-spa && npm test` |
+| Angular unit tests with coverage | `cd frontend/webhook-spa && npm test -- --watch=false --coverage` |
+| Rebuild containers + wait healthy | `pwsh scripts/rebuild-and-wait.ps1` (Windows) or `bash scripts/rebuild-and-wait.sh` (Linux/macOS) |
+| Rebuild single service | `pwsh scripts/rebuild-and-wait.ps1 -Services api` |
+
+Backend coverage thresholds are enforced via `tests/coverlet.runsettings` (80% line/method). Pass `--settings tests/coverlet.runsettings` to `dotnet test` to apply them locally.
 
 **Gotchas:**
 - Integration tests **fail silently or hang** if Docker Desktop is not running — the Testcontainers SQL Server container never starts.
@@ -263,6 +268,7 @@ For queries: implement `IRequest<TResult>` and return `TResult` from the handler
 - E2E tests require the full stack to be running; they are not self-contained.
 - `TestNullSseNotifier` in integration tests is a no-op — SSE delivery is not exercised by the integration suite.
 - `--no-build` skips compilation. Only use it when you are certain no code has changed.
+- **Run `scripts/rebuild-and-wait` before E2E or integration tests after any backend/worker code change.** Nginx caches the API container IP on startup — the script reloads nginx after rebuild so the new container IP is picked up.
 
 ---
 

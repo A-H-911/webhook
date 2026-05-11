@@ -13,7 +13,7 @@ using WebhookService.Infrastructure.Persistence;
 
 namespace WebhookService.IntegrationTests;
 
-public sealed class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public class WebAppFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly MsSqlContainer _db = new MsSqlBuilder()
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")

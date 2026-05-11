@@ -44,6 +44,10 @@ Thumbs.db
 # Claude Code local settings
 .claude/settings.local.json
 .claude/plans/
+.claude/PRPs/
+
+# Local investigation artefacts
+e2e-final-result.png
 
 # Local investigation reports (not part of the project)
 ecc-observer-fix-report.md

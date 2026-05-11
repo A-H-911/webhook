@@ -26,7 +26,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Unit tests
-        run: dotnet test tests/WebhookService.UnitTests/ --no-build --configuration Release --logger "trx;LogFileName=unit-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/WebhookService.UnitTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=unit-results.trx" --results-directory ./TestResults
 
       - name: Upload test results
         if: always()
@@ -55,7 +55,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Integration tests (Docker via Testcontainers)
-        run: dotnet test tests/WebhookService.IntegrationTests/ --no-build --configuration Release --logger "trx;LogFileName=integration-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/WebhookService.IntegrationTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=integration-results.trx" --results-directory ./TestResults
 
       - name: Upload test results
         if: always()
@@ -85,3 +85,58 @@ jobs:
       - name: Build
         working-directory: frontend/webhook-spa
         run: npm run build
+
+      - name: Unit tests with coverage
+        working-directory: frontend/webhook-spa
+        run: npm test -- --watch=false --coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/webhook-spa/coverage/
+
+  e2e-test:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [build-and-test, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Start stack and wait for health
+        run: bash scripts/rebuild-and-wait.sh
+        env:
+          AUTH_PASSWORD_HASH: ${{ secrets.AUTH_PASSWORD_HASH }}
+          AUTH_USERNAME: ${{ secrets.AUTH_USERNAME }}
+          WEBHOOK_BASE_URL: http://localhost:8088
+
+      - name: Install Playwright browsers
+        run: pwsh tests/WebhookService.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Run E2E tests
+        run: dotnet test tests/WebhookService.E2ETests/ --no-build --configuration Release --logger "trx;LogFileName=e2e-results.trx" --results-directory ./TestResults
+        env:
+          E2E_BASE_URL: http://localhost:8088
+          E2E_AUTH_PASSWORD: ${{ secrets.E2E_AUTH_PASSWORD }}
+
+      - name: Upload test results and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: |
+            TestResults/
+            tests/WebhookService.E2ETests/bin/Release/net10.0/playwright-traces/

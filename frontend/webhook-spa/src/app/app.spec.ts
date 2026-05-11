@@ -1,6 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { App } from './app';
+import { AuthService } from './core/services/auth.service';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 
 describe('App', () => {
   beforeEach(async () => {
@@ -29,5 +32,31 @@ describe('App', () => {
     const btn = compiled.querySelector('button[mat-icon-button]');
     expect(btn).toBeTruthy();
     expect(btn?.getAttribute('aria-label')).toContain('mode');
+  });
+});
+
+describe('App — logout', () => {
+  it('logout delegates to AuthService and navigates to /login', async () => {
+    const authMock = {
+      logout: vi.fn().mockResolvedValue(undefined),
+      user: () => null,
+      isAuthenticated: () => false,
+      initialize: vi.fn().mockResolvedValue(undefined),
+    };
+    await TestBed.configureTestingModule({
+      imports: [App],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: AuthService, useValue: authMock },
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(App);
+    const router = TestBed.inject(Router);
+    const navigateSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+    await fixture.componentInstance.logout();
+    expect(authMock.logout).toHaveBeenCalled();
+    expect(navigateSpy).toHaveBeenCalledWith(['/login']);
   });
 });
