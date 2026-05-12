@@ -236,3 +236,32 @@ session, or the observer daemon exited. Restart via ECC's start-observer command
 3. Patch new `observer-loop.sh`: add `cd "$PROJECT_DIR"`, load `prompt_content` before cd, use `-p "$prompt_content"`, set `ECC_HOOK_PROFILE=minimal` — see §3–4
 4. Verify guard hook command is still the absolute path — see §5
 5. Run `/instinct-status` via PowerShell — should show 16 instincts — see §8
+
+---
+
+## 10. Known: `Global instincts: 0` when all globals are shadowed by project scope
+
+**This is correct behavior, not a bug.**
+
+`load_all_instincts` deduplicates globals against project-scoped instincts by ID
+(lines 438–441 of `instinct-cli.py`). If you promote an instinct that already
+exists at project scope with the same ID, the global is silently dropped from the
+display — project scope wins.
+
+The global files ARE written to `~/.local/share/ecc-homunculus/instincts/personal/`
+and ARE active. They will appear as `[global]` in any other project that does not
+have a project-scoped instinct with the same ID.
+
+To confirm the globals are stored correctly:
+```powershell
+ls "C:/Users/ahammo/.local/share/ecc-homunculus/instincts/personal/"
+```
+
+Expected output after promoting the 5 instincts from this project:
+```
+command-handler-state-mutation-sequence.yaml
+command-validator-property-sync.yaml
+dotnet-test-filter-targeted.yaml
+dto-mapper-consistency.yaml
+redis-multi-service-infrastructure-coordination.yaml
+```
