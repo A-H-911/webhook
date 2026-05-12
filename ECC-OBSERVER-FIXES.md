@@ -133,7 +133,8 @@ PROMPT
   cd "$PROJECT_DIR" || { echo "[$(date)] Failed to cd to PROJECT_DIR ($PROJECT_DIR), skipping analysis" >> "$LOG_FILE"; rm -f "$analysis_file"; return; }
 
   # FIX B: use in-memory prompt_content, not the temp file path
-  ECC_SKIP_OBSERVE=1 ECC_HOOK_PROFILE=minimal claude --model haiku --max-turns "$max_turns" --print \
+  # FIX C: use --model sonnet — Haiku thrashes on token-dense observations (see §12)
+  ECC_SKIP_OBSERVE=1 ECC_HOOK_PROFILE=minimal claude --model sonnet --max-turns "$max_turns" --print \
     --allowedTools "Read,Write" \
     -p "$prompt_content" >> "$LOG_FILE" 2>&1 &
 ```
@@ -307,11 +308,33 @@ cat ~/.local/share/ecc-homunculus/projects/<PROJECT_ID>/observations.archive/pro
 
 1. Verify `webhook/.claude/settings.json` still has the 4 `ECC_OBSERVER_*` env vars — see §1
 2. Verify `~/.claude/settings.json` has `OBSERVER_ACTIVE_HOURS_START=0` and `OBSERVER_ACTIVE_HOURS_END=0` — see §2
-3. Patch new `observer-loop.sh`: add byte-cap after tail-n line, add `cd "$PROJECT_DIR"`, load `prompt_content` before cd, use `-p "$prompt_content"`, set `ECC_HOOK_PROFILE=minimal` — see §3–4
+3. Patch new `observer-loop.sh`: add byte-cap after tail-n line, add `cd "$PROJECT_DIR"`, load `prompt_content` before cd, use `-p "$prompt_content"`, set `ECC_HOOK_PROFILE=minimal`, change `--model haiku` to `--model sonnet` — see §3–4, §12
 4. Verify guard hook command is still the absolute path — see §5
 5. Confirm `~/.local/share/ecc-homunculus/config.json` still has `enabled: true` — see §11
 6. Start the daemon: `bash start-observer.sh` from project root — see §11
 7. Run `/instinct-status` via PowerShell — see §8
+
+---
+
+## 12. `observer-loop.sh` — Use `--model sonnet`, not `--model haiku`
+
+**Symptom:** Observer log shows `Autocompact is thrashing: the context refilled to the limit within 3 turns` on every analysis cycle. Claude writes nothing, exits 1.
+
+**Root cause:** Chrome DevTools observations include DOM snapshots, screenshot base64 data, and full network request bodies. Even with the 15KB byte cap (§3 Bug A), a single dense tool-output line can be 3,000–5,000 tokens. Haiku's effective context window for an analysis session is too small to hold the prompt + reading the analysis file + writing instinct files simultaneously.
+
+**Fix:** In the `analyze_observations` function, change `--model haiku` to `--model sonnet`:
+
+```bash
+# WRONG — Haiku thrashes on chrome-devtools observation data:
+ECC_SKIP_OBSERVE=1 ECC_HOOK_PROFILE=minimal claude --model haiku ...
+
+# CORRECT — Sonnet has a larger context window and handles dense JSONL:
+ECC_SKIP_OBSERVE=1 ECC_HOOK_PROFILE=minimal claude --model sonnet ...
+```
+
+**Verified:** After switching to Sonnet (2026-05-12, 21:30), the analysis completed in a single pass, identified a Glob-rescue path-resolution pattern, and wrote `glob-rescue-path-resolution.md` successfully. No "Autocompact is thrashing" in the log.
+
+**Cost note:** Sonnet costs more per token than Haiku. With the 15KB byte cap, each analysis call reads ~30 lines (~10–15K tokens) — approximately $0.01–0.03 per analysis run at current pricing. At 5-minute intervals during active sessions, this is acceptable.
 
 ---
 
