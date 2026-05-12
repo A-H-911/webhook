@@ -81,7 +81,11 @@ MAX_ANALYSIS_BYTES="${ECC_OBSERVER_MAX_ANALYSIS_BYTES:-200000}"
 tail -n "$MAX_ANALYSIS_LINES" "$OBSERVATIONS_FILE" | tail -c "$MAX_ANALYSIS_BYTES" > "$analysis_file"
 ```
 
-200,000 bytes (~195KB) stays safely under the 256KB Read tool limit.
+**The correct default is 15,000 bytes, not 200,000.** Each observation line contains
+full tool input/output JSON — a single chrome-devtools screenshot result can be
+thousands of tokens. 200KB of JSONL = ~90,000 tokens, which exceeds Haiku's
+per-call Read tool limit of ~25,000 tokens. 15,000 bytes ≈ 30 dense lines ≈
+10,000–15,000 tokens — safely within the limit.
 The log line should also be updated to report the byte cap value for debugging:
 ```bash
 echo "[$(date)] Using last $analysis_count of $obs_count observations for analysis (byte-capped at ${MAX_ANALYSIS_BYTES})" >> "$LOG_FILE"
