@@ -63,7 +63,31 @@ File: `~/.claude/plugins/cache/everything-claude-code/ecc/<VERSION>/skills/conti
 Two bugs exist in the `analyze_observations` function around how the claude
 subprocess is invoked.
 
-### Bug A — CWD not set before claude invocation
+### Bug A — Analysis file not byte-capped (703KB exceeds Read tool limit)
+
+The `tail -n 500` line filter is not enough. Each observation line can be 1–5KB
+(it includes full tool input/output JSON). 500 lines of large tool outputs = 703KB,
+which exceeds the Claude Read tool's ~256KB limit. Haiku aborts without analyzing
+anything.
+
+**Fix:** pipe through `tail -c` after `tail -n` to cap total bytes:
+
+```bash
+# WRONG — line count only; can still produce 700KB+ files:
+tail -n "$MAX_ANALYSIS_LINES" "$OBSERVATIONS_FILE" > "$analysis_file"
+
+# CORRECT — line count + byte cap:
+MAX_ANALYSIS_BYTES="${ECC_OBSERVER_MAX_ANALYSIS_BYTES:-200000}"
+tail -n "$MAX_ANALYSIS_LINES" "$OBSERVATIONS_FILE" | tail -c "$MAX_ANALYSIS_BYTES" > "$analysis_file"
+```
+
+200,000 bytes (~195KB) stays safely under the 256KB Read tool limit.
+The log line should also be updated to report the byte cap value for debugging:
+```bash
+echo "[$(date)] Using last $analysis_count of $obs_count observations for analysis (byte-capped at ${MAX_ANALYSIS_BYTES})" >> "$LOG_FILE"
+```
+
+### Bug B — CWD not set before claude invocation
 
 The `analysis_relpath` is a path relative to `$PROJECT_DIR`, but the shell's
 working directory when `analyze_observations` runs may not be `$PROJECT_DIR`.
@@ -229,13 +253,61 @@ session, or the observer daemon exited. Restart via ECC's start-observer command
 
 ---
 
+## 11. Observer daemon is disabled by default — must enable persistently
+
+The plugin ships with `config.json` set to `"enabled": false`. The `start-observer.sh`
+checks this flag and refuses to start when false. **No hook auto-starts the observer**
+either — it is always a manual step.
+
+The plugin's own `config.json` is overwritten on every plugin update. Instead, create
+a persistent override at `~/.local/share/ecc-homunculus/config.json` — `start-observer.sh`
+checks this path first.
+
+```json
+// Create: ~/.local/share/ecc-homunculus/config.json
+{
+  "version": "2.1",
+  "observer": {
+    "enabled": true,
+    "run_interval_minutes": 5,
+    "min_observations_to_analyze": 20
+  }
+}
+```
+
+Then start the daemon from the project root:
+```bash
+cd /path/to/project
+bash "~/.claude/plugins/cache/everything-claude-code/ecc/<VERSION>/skills/continuous-learning-v2/agents/start-observer.sh"
+```
+
+To restart after editing `observer-loop.sh`:
+```bash
+bash start-observer.sh stop && bash start-observer.sh
+```
+
+To trigger an immediate analysis (instead of waiting 5 min):
+```bash
+kill -USR1 $(cat ~/.local/share/ecc-homunculus/projects/<PROJECT_ID>/.observer.pid)
+```
+
+To re-inject archived observations (e.g. after a failed analysis run archived them prematurely):
+```bash
+cat ~/.local/share/ecc-homunculus/projects/<PROJECT_ID>/observations.archive/processed-*.jsonl \
+  >> ~/.local/share/ecc-homunculus/projects/<PROJECT_ID>/observations.jsonl
+```
+
+---
+
 ## Quick re-apply checklist after plugin update
 
 1. Verify `webhook/.claude/settings.json` still has the 4 `ECC_OBSERVER_*` env vars — see §1
 2. Verify `~/.claude/settings.json` has `OBSERVER_ACTIVE_HOURS_START=0` and `OBSERVER_ACTIVE_HOURS_END=0` — see §2
-3. Patch new `observer-loop.sh`: add `cd "$PROJECT_DIR"`, load `prompt_content` before cd, use `-p "$prompt_content"`, set `ECC_HOOK_PROFILE=minimal` — see §3–4
+3. Patch new `observer-loop.sh`: add byte-cap after tail-n line, add `cd "$PROJECT_DIR"`, load `prompt_content` before cd, use `-p "$prompt_content"`, set `ECC_HOOK_PROFILE=minimal` — see §3–4
 4. Verify guard hook command is still the absolute path — see §5
-5. Run `/instinct-status` via PowerShell — should show 16 instincts — see §8
+5. Confirm `~/.local/share/ecc-homunculus/config.json` still has `enabled: true` — see §11
+6. Start the daemon: `bash start-observer.sh` from project root — see §11
+7. Run `/instinct-status` via PowerShell — see §8
 
 ---
 
