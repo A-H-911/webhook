@@ -13,9 +13,13 @@ export class RequestService {
     page = 1,
     pageSize = 20,
     search = '',
+    methods: string[] = [],
+    statusGroups: number[] = [],
   ): Observable<PagedResult<RequestSummary>> {
     let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (search.trim()) params = params.set('search', search.trim());
+    for (const m of methods) params = params.append('methods', m);
+    for (const g of statusGroups) params = params.append('statusGroups', g);
     return this.http.get<PagedResult<RequestSummary>>(`/api/tokens/${tokenId}/requests`, {
       params,
     });

@@ -9,6 +9,7 @@ function makeToken(overrides: Partial<Token> = {}): Token {
   return {
     id: 'tok-1',
     token: 'aaaaaaaa-0000-0000-0000-000000000001',
+    name: 'test-token',
     webhookUrl: 'https://example.com/webhook/tok-1',
     description: 'test',
     createdAt: '2026-01-01T00:00:00Z',
@@ -34,11 +35,13 @@ describe('TokenService', () => {
 
   // ── getTokens ─────────────────────────────────────────────────────────────
 
-  it('getTokens sends GET /api/tokens', () => {
+  it('getTokens sends GET /api/tokens with pagination params', () => {
     service.getTokens().subscribe();
-    const req = http.expectOne('/api/tokens');
+    const req = http.expectOne((r) => r.url === '/api/tokens');
     expect(req.request.method).toBe('GET');
-    req.flush([makeToken()]);
+    expect(req.request.params.get('skip')).toBe('0');
+    expect(req.request.params.get('take')).toBe('50');
+    req.flush({ items: [], total: 0, hasMore: false });
   });
 
   // ── getToken ──────────────────────────────────────────────────────────────
@@ -52,19 +55,19 @@ describe('TokenService', () => {
 
   // ── createToken ───────────────────────────────────────────────────────────
 
-  it('createToken sends POST with description', () => {
+  it('createToken sends POST with name and null description', () => {
     service.createToken('my token').subscribe();
     const req = http.expectOne('/api/tokens');
     expect(req.request.method).toBe('POST');
-    expect(req.request.body).toEqual({ description: 'my token' });
-    req.flush(makeToken({ description: 'my token' }));
+    expect(req.request.body).toEqual({ name: 'my token', description: null });
+    req.flush(makeToken({ name: 'my token' }));
   });
 
-  it('createToken sends POST with null description when omitted', () => {
-    service.createToken().subscribe();
+  it('createToken sends POST with name and explicit description', () => {
+    service.createToken('my token', 'a desc').subscribe();
     const req = http.expectOne('/api/tokens');
-    expect(req.request.body).toEqual({ description: null });
-    req.flush(makeToken({ description: null }));
+    expect(req.request.body).toEqual({ name: 'my token', description: 'a desc' });
+    req.flush(makeToken({ name: 'my token', description: 'a desc' }));
   });
 
   // ── deleteToken ───────────────────────────────────────────────────────────

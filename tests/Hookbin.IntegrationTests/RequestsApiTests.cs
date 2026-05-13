@@ -15,7 +15,7 @@ public sealed class RequestsApiTests(WebAppFactory factory) : IClassFixture<WebA
 
     private async Task<(string tokenId, string webhookToken)> CreateTokenAsync()
     {
-        var response = await _client.PostAsJsonAsync("/api/tokens", new { description = "requests-test" });
+        var response = await _client.PostAsJsonAsync("/api/tokens", new { name = "requests-test" });
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = body.GetProperty("id").GetString()!;
         var url = body.GetProperty("webhookUrl").GetString()!;

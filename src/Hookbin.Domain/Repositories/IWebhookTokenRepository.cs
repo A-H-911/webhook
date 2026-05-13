@@ -10,6 +10,10 @@ public interface IWebhookTokenRepository
     // Receive path only — does not filter IsActive so inactive tokens still capture requests.
     Task<WebhookToken?> GetByTokenIncludingInactiveAsync(Guid token, CancellationToken ct = default);
 
+    // Admin mutation path — does not filter IsActive so PUT /api/tokens/{id} can reactivate
+    // a previously-deactivated token. Read-only handlers should keep using GetByIdAsync.
+    Task<WebhookToken?> GetByIdIncludingInactiveAsync(Guid id, CancellationToken ct = default);
+
     Task<IReadOnlyList<WebhookToken>> GetAllActiveAsync(CancellationToken ct = default);
     Task<(IReadOnlyList<TokenPageRow> Items, int Total)> GetPagedWithStatsAsync(
         int skip, int take, CancellationToken ct = default);

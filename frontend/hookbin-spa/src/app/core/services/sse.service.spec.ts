@@ -113,4 +113,42 @@ describe('SseService', () => {
     expect(events).toContainEqual({ eventType: 'token-deleted' });
     expect(completed).toBe(true);
   });
+
+  it('after onerror, schedules a reconnect (creates a new EventSource)', () => {
+    vi.useFakeTimers();
+    try {
+      const events: SseEvent[] = [];
+      service.connect('tok-1').subscribe((e) => events.push(e));
+      const firstInstance = MockEventSource.lastInstance;
+      expect(firstInstance).toBeDefined();
+
+      MockEventSource.lastInstance?.simulateError();
+      expect(firstInstance?.closed).toBe(true);
+      expect(events).toContainEqual({ eventType: 'disconnected' });
+
+      // Advance past the initial 1000 ms reconnect delay → service must construct a NEW EventSource
+      vi.advanceTimersByTime(1100);
+      expect(MockEventSource.lastInstance).not.toBe(firstInstance);
+      expect(MockEventSource.lastInstance?.url).toBe('/api/tokens/tok-1/sse');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reconnect after unsubscribe even if onerror is queued', () => {
+    vi.useFakeTimers();
+    try {
+      const sub = service.connect('tok-1').subscribe();
+      const firstInstance = MockEventSource.lastInstance;
+
+      sub.unsubscribe();
+      MockEventSource.lastInstance?.simulateError();
+
+      vi.advanceTimersByTime(5000);
+      // After unsubscribe, the service should NOT create a new EventSource
+      expect(MockEventSource.lastInstance).toBe(firstInstance);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

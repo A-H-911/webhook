@@ -1,8 +1,10 @@
 # Operations Runbook
 
-**Last Updated:** 2026-05-11
+<!-- AUTO-GENERATED:HEADER START -->
+**Last Updated:** 2026-05-13 (sourced from `docker-compose.yml` + `.env.example`; updated test counts; added Stryker mutation gate; CSRF + custom modal mention; jobs-worker single-replica callout)
+<!-- AUTO-GENERATED:HEADER END -->
 
-This guide covers deployment, health monitoring, troubleshooting, and operational procedures for the Hookbin.
+This guide covers deployment, health monitoring, troubleshooting, and operational procedures for the Hookbin stack.
 
 ---
 
@@ -403,6 +405,18 @@ docker compose exec jobs-worker dotnet <command>
 docker compose restart jobs-worker
 ```
 
+> **DO NOT scale `jobs-worker` past 1 replica.** `RetentionCleanupService` has no leader election. Two replicas would issue overlapping `DELETE` ranges every 24h tick — benign correctness-wise, but wasteful and risks deadlocks under high write load. The compose file enforces `deploy: { replicas: 1 }` and the architecture test `OperationalSnapshotTests.JobsWorker_HasSingleReplica` catches accidental drift.
+
+### State-Changing API Calls Return 400 from Custom Clients (not Angular)
+
+**Symptom:** A `curl`, Postman, or custom-fetch script gets HTTP 400 from `POST /api/tokens` (or any other write endpoint) even when authenticated. The body looks like `{"type":"...","title":"Bad Request","status":400,"traceId":"..."}`.
+
+**Likely Cause:** Missing `X-XSRF-TOKEN` header. The API enforces CSRF via the double-submit-cookie pattern. Angular's `HttpClient` adds the header automatically; raw clients don't.
+
+**Solution:** Fetch the `XSRF-TOKEN` cookie first via any authenticated GET, then echo it in the `X-XSRF-TOKEN` header on writes. See `docs/CONTRIBUTING.md` § "Calling the API from non-Angular Clients (CSRF)" for a copy-paste snippet.
+
+The unauthenticated webhook receiver (`POST /webhook/{guid}`) does **not** require CSRF.
+
 ### High Memory Usage on SQL Server
 
 **Symptom:** `docker stats` shows sqlserver using > 2 GB RAM
@@ -581,6 +595,26 @@ docker compose build
 dotnet test
 cd frontend/hookbin-spa && npm test
 ```
+
+### Mutation-Test Audit (Quarterly)
+
+A mutation-testing pass is advisory but recommended every quarter (or after large refactors) to confirm tests still PIN the behaviors they claim to. Gate: **≥ 60%** on `Hookbin.Domain` and `Hookbin.Application`.
+
+```bash
+# Install Stryker.NET once
+dotnet tool install -g dotnet-stryker
+
+# Run per project (each takes 10-50 min depending on project size)
+dotnet stryker --project src/Hookbin.Domain/Hookbin.Domain.csproj --solution Hookbin.slnx --reporter html
+dotnet stryker --project src/Hookbin.Application/Hookbin.Application.csproj --solution Hookbin.slnx --reporter html
+dotnet stryker --project src/Hookbin.API/Hookbin.API.csproj --solution Hookbin.slnx --reporter html
+
+# HTML reports in StrykerOutput/<timestamp>/reports/mutation-report.html
+```
+
+Last baseline (2026-05-13): Domain 86.4%, Application 90.4%, API 73.4%, Infrastructure 52.7% (integration-tested). See `docs/AUDIT/BASELINE.md` for full interpretation.
+
+If a score drops below 60% after a feature merge, identify the surviving mutants in the HTML report and add targeted tests — or document why the survivors are acceptable (e.g., the code path is only reachable in integration tests).
 
 ---
 

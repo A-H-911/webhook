@@ -87,7 +87,8 @@ public sealed class DashboardE2EFixture : IAsyncLifetime
 /// Set E2E_AUTH_USERNAME / E2E_AUTH_PASSWORD for credentials (default: admin/admin).
 /// Before first run: pwsh bin/Debug/net10.0/playwright.ps1 install
 /// </summary>
-public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixture<DashboardE2EFixture>
+[Collection("ComprehensiveE2E")]
+public sealed class DashboardE2ETests(DashboardE2EFixture fixture)
 {
     private static string BaseUrl => DashboardE2EFixture.BaseUrl;
     private HttpClient ApiClient => fixture.ApiClient;
@@ -95,7 +96,7 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
 
     private async Task<(string tokenId, string webhookUrl)> CreateTokenViaApiAsync(string description = "e2e-token")
     {
-        var resp = await ApiClient.PostAsJsonAsync("/api/tokens", new { description });
+        var resp = await ApiClient.PostAsJsonAsync("/api/tokens", new { name = description });
         var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         return (body.GetProperty("id").GetString()!, body.GetProperty("webhookUrl").GetString()!);
     }
@@ -155,14 +156,22 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
         var page = await NewPageAsync();
         try
         {
+            var name = $"create-test-{Guid.NewGuid():N}"[..28];
             await page.GotoAsync($"{BaseUrl}/dashboard");
             await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
-            await page.WaitForSelectorAsync("mat-dialog-container");
-            await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
+            await page.WaitForSelectorAsync(".modal-panel");
+            await page.GetByPlaceholder("e.g. github-events").FillAsync(name);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Create endpoint", Exact = true }).ClickAsync();
 
-            await page.WaitForSelectorAsync("mat-card", new() { Timeout = 10_000 });
-            var cards = await page.QuerySelectorAllAsync("mat-card");
-            Assert.NotEmpty(cards);
+            // Create navigates to the new token's detail page — wait then return to dashboard
+            await Assertions.Expect(page).ToHaveURLAsync(new Regex("/tokens/[0-9a-f-]+"),
+                new() { Timeout = 10_000 });
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+
+            // The newly-created card should appear by name on the dashboard
+            var newCard = page.Locator(".card", new() { Has = page.Locator(".card-name", new() { HasText = name }) });
+            await newCard.First.WaitForAsync(new() { Timeout = 10_000 });
+            await Assertions.Expect(newCard.First).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }
@@ -175,8 +184,8 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
         try
         {
             await page.GotoAsync($"{BaseUrl}/dashboard");
-            await page.WaitForSelectorAsync("mat-card");
-            await page.Locator("mat-card").First.ClickAsync(new LocatorClickOptions { Force = true });
+            await page.WaitForSelectorAsync(".card:not(.skeleton)");
+            await page.Locator(".card:not(.skeleton)").First.ClickAsync(new LocatorClickOptions { Force = true });
             await Assertions.Expect(page).ToHaveURLAsync(new Regex("/tokens/"));
         }
         finally { await page.CloseAsync(); }
@@ -258,7 +267,8 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture) : IClassFixtu
                 new() { NameRegex = new Regex("delete.*url", RegexOptions.IgnoreCase) });
             await deleteButton.ClickAsync(new LocatorClickOptions { Force = true });
 
-            var confirmButton = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            // Scope to the confirm modal — the toolbar also has a .btn-danger ("Delete URL")
+            var confirmButton = page.Locator(".modal-panel .btn-danger");
             await confirmButton.WaitForAsync(new() { Timeout = 5_000 });
             await confirmButton.ClickAsync();
 

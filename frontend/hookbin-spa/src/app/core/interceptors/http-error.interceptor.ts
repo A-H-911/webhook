@@ -1,11 +1,11 @@
 import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { ToastService } from '../../shared/toast/toast.service';
 import { catchError, throwError } from 'rxjs';
 
 export const httpErrorInterceptor: HttpInterceptorFn = (req, next) => {
-  const snackBar = inject(MatSnackBar);
+  const toast = inject(ToastService);
   const router = inject(Router);
 
   return next(req).pipe(
@@ -19,7 +19,7 @@ export const httpErrorInterceptor: HttpInterceptorFn = (req, next) => {
       }
       const message =
         err.error?.detail ?? err.error?.title ?? err.message ?? 'An unexpected error occurred';
-      snackBar.open(message, 'Dismiss', { duration: 5000 });
+      toast.show(message, 5000);
       return throwError(() => err);
     }),
   );

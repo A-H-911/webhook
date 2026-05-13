@@ -1,15 +1,16 @@
 # Hookbin — Codemaps Index
 
-**Last Updated:** 2026-05-11 (architecture tests suite; domain entity encapsulation; FluentAssertions alignment; WebhookTokenRepository.UpdateAsync fix for EF Core owned entities)
+**Last Updated:** 2026-05-13 (zero-trust audit landed; Stryker.NET mutation baselines; Angular Material → custom modal/toast/CDK Overlay; ZeroTrustInvariantsTests + OperationalSnapshotTests; SetRequestNote CQRS handler; 6th migration `AddTokenNameAndRequestResponseAndCountry`; logo asset + README hero)
 
 ---
 
 ## Overview
 
 Hookbin is a self-hosted webhook debugging platform built with:
-- **.NET 10** backend (Clean Architecture: Domain → Application → Infrastructure → API)
-- **Angular 21** frontend SPA (standalone components, Angular Material)
+- **.NET 10** backend (Clean Architecture: Domain → Application → Infrastructure → API + StreamWorker + JobsWorker)
+- **Angular 21** frontend SPA (standalone components, signals, custom modal via `@angular/cdk` Overlay — Material removed)
 - **SQL Server 2022** with Testcontainers for integration testing
+- **Redis 7** for token cache, request stream, SSE pub/sub, session revocation
 - **SSE** for real-time request notifications
 
 ---

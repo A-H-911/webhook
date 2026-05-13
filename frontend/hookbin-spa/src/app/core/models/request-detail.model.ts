@@ -14,4 +14,6 @@ export interface RequestDetail {
   userAgent: string | null;
   processingTimeMs: number | null;
   note: string | null;
+  responseStatusCode: number | null;
+  ipCountry: string | null;
 }

@@ -56,4 +56,54 @@ public sealed class CqrsConventionTests(ArchitectureFixture fixture) : IClassFix
             .AndShould().BePublic()
             .Check(_arch);
     }
+
+    [Fact]
+    public void CommandHandlers_ImplementIRequestHandler()
+    {
+        var handlerTypes = typeof(Hookbin.Application.Tokens.Commands.CreateToken.CreateTokenCommand).Assembly
+            .GetTypes()
+            .Where(t => t.IsClass && !t.IsAbstract
+                && t.Namespace is not null
+                && t.Namespace.StartsWith("Hookbin.Application", StringComparison.Ordinal)
+                && t.Name.EndsWith("CommandHandler", StringComparison.Ordinal))
+            .ToList();
+
+        handlerTypes.Should().NotBeEmpty("at least one command handler must exist for the rule to be meaningful");
+
+        var nonHandlerImplementors = handlerTypes
+            .Where(t => !t.GetInterfaces().Any(i =>
+                i.IsGenericType
+                && i.GetGenericTypeDefinition().FullName?.StartsWith("MediatR.IRequestHandler", StringComparison.Ordinal) == true))
+            .Select(t => t.FullName)
+            .ToList();
+
+        nonHandlerImplementors.Should().BeEmpty(
+            "every *CommandHandler must implement MediatR.IRequestHandler<,> or IRequestHandler<>. Offenders: {0}",
+            string.Join(", ", nonHandlerImplementors));
+    }
+
+    [Fact]
+    public void QueryHandlers_ImplementIRequestHandler()
+    {
+        var handlerTypes = typeof(Hookbin.Application.Tokens.Commands.CreateToken.CreateTokenCommand).Assembly
+            .GetTypes()
+            .Where(t => t.IsClass && !t.IsAbstract
+                && t.Namespace is not null
+                && t.Namespace.StartsWith("Hookbin.Application", StringComparison.Ordinal)
+                && t.Name.EndsWith("QueryHandler", StringComparison.Ordinal))
+            .ToList();
+
+        handlerTypes.Should().NotBeEmpty("at least one query handler must exist for the rule to be meaningful");
+
+        var nonHandlerImplementors = handlerTypes
+            .Where(t => !t.GetInterfaces().Any(i =>
+                i.IsGenericType
+                && i.GetGenericTypeDefinition().FullName?.StartsWith("MediatR.IRequestHandler", StringComparison.Ordinal) == true))
+            .Select(t => t.FullName)
+            .ToList();
+
+        nonHandlerImplementors.Should().BeEmpty(
+            "every *QueryHandler must implement MediatR.IRequestHandler<,>. Offenders: {0}",
+            string.Join(", ", nonHandlerImplementors));
+    }
 }

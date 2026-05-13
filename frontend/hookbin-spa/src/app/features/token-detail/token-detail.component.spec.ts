@@ -4,9 +4,9 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute } from '@angular/router';
 import { of, Observable, EMPTY, Subject, throwError } from 'rxjs';
-import { MatDialog } from '@angular/material/dialog';
-import { MatSnackBar } from '@angular/material/snack-bar';
 import { Router } from '@angular/router';
+import { ModalService } from '../../shared/modal/modal.service';
+import { ToastService } from '../../shared/toast/toast.service';
 import { SseEvent } from '../../core/services/sse.service';
 
 import { TokenDetailComponent } from './token-detail.component';
@@ -36,6 +36,8 @@ function makeDetail(overrides: Partial<RequestDetail> = {}): RequestDetail {
     userAgent: null,
     processingTimeMs: null,
     note: null,
+    responseStatusCode: null,
+    ipCountry: null,
     ...overrides,
   };
 }
@@ -44,6 +46,7 @@ function makeToken(): Token {
   return {
     id: 'tok-1',
     token: 'aaaaaaaa-0000-0000-0000-000000000001',
+    name: 'test-token',
     description: 'test token',
     webhookUrl: 'https://example.com/webhook/tok-1',
     isActive: true,
@@ -86,10 +89,10 @@ function setup(
     exportRequest: vi.fn(),
   };
   const sseService = { connect: vi.fn().mockReturnValue(sseEvents$) };
-  const dialog = {
+  const modal = {
     open: vi.fn().mockReturnValue({ afterClosed: () => dialogAfterClosed }),
   };
-  const snackBar = { open: vi.fn() };
+  const toast = { show: vi.fn() };
 
   TestBed.configureTestingModule({
     imports: [TokenDetailComponent],
@@ -100,8 +103,8 @@ function setup(
       { provide: TokenService, useValue: tokenService },
       { provide: RequestService, useValue: requestService },
       { provide: SseService, useValue: sseService },
-      { provide: MatDialog, useValue: dialog },
-      { provide: MatSnackBar, useValue: snackBar },
+      { provide: ModalService, useValue: modal },
+      { provide: ToastService, useValue: toast },
       {
         provide: ActivatedRoute,
         useValue: {
@@ -116,7 +119,15 @@ function setup(
   const component = fixture.componentInstance;
   fixture.detectChanges();
   const router = TestBed.inject(Router);
-  return { fixture, component, requestService, tokenService, dialog, snackBar, router };
+  return {
+    fixture,
+    component,
+    requestService,
+    tokenService,
+    dialog: modal,
+    snackBar: toast,
+    router,
+  };
 }
 
 // ── parsedQueryParams ─────────────────────────────────────────────────────────
@@ -244,50 +255,36 @@ describe('TokenDetailComponent — threatLinks', () => {
 // ── Note editing state machine ────────────────────────────────────────────────
 
 describe('TokenDetailComponent — note state', () => {
-  it('startNoteEdit sets noteEditing to true', () => {
-    const { component } = setup();
-    component.selectedDetail.set(makeDetail({ note: 'hello' }));
-    component.startNoteEdit();
-    expect(component.noteEditing()).toBe(true);
-  });
-
-  it('startNoteEdit copies current note into noteValue', () => {
-    const { component } = setup();
-    component.selectedDetail.set(makeDetail({ note: 'existing note' }));
-    component.startNoteEdit();
-    expect(component.noteValue).toBe('existing note');
-  });
-
-  it('cancelNoteEdit sets noteEditing to false', () => {
-    const { component } = setup();
-    component.startNoteEdit();
-    component.cancelNoteEdit();
-    expect(component.noteEditing()).toBe(false);
-  });
-
-  it('saveNote calls updateNote with trimmed value', () => {
+  it('saveNote calls updateNote with trimmed value when changed', () => {
     const { component, requestService } = setup();
-    component.selectedDetail.set(makeDetail({ id: 'req-1' }));
+    component.selectedDetail.set(makeDetail({ id: 'req-1', note: null }));
     component.noteValue = '  my note  ';
     component.saveNote();
     expect(requestService.updateNote).toHaveBeenCalledWith('tok-1', 'req-1', 'my note');
   });
 
-  it('saveNote with empty value passes null', () => {
+  it('saveNote with empty value passes null when previously had a note', () => {
     const { component, requestService } = setup();
-    component.selectedDetail.set(makeDetail({ id: 'req-1' }));
+    component.selectedDetail.set(makeDetail({ id: 'req-1', note: 'old' }));
     component.noteValue = '   ';
     component.saveNote();
     expect(requestService.updateNote).toHaveBeenCalledWith('tok-1', 'req-1', null);
   });
 
-  it('saveNote exits edit mode on success', () => {
-    const { component } = setup();
-    component.selectedDetail.set(makeDetail());
-    component.noteEditing.set(true);
-    component.noteValue = 'x';
+  it('saveNote skips update when value is unchanged', () => {
+    const { component, requestService } = setup();
+    component.selectedDetail.set(makeDetail({ id: 'req-1', note: 'same' }));
+    component.noteValue = 'same';
     component.saveNote();
-    expect(component.noteEditing()).toBe(false);
+    expect(requestService.updateNote).not.toHaveBeenCalled();
+  });
+
+  it('saveNote skips update when both stored and current are empty', () => {
+    const { component, requestService } = setup();
+    component.selectedDetail.set(makeDetail({ id: 'req-1', note: null }));
+    component.noteValue = '';
+    component.saveNote();
+    expect(requestService.updateNote).not.toHaveBeenCalled();
   });
 });
 
@@ -323,11 +320,14 @@ describe('TokenDetailComponent — selectRequest', () => {
     expect(component.selectedDetail()).toEqual(detail);
   });
 
-  it('clears noteEditing when selecting a new request', () => {
-    const { component } = setup();
-    component.noteEditing.set(true);
+  it('syncs noteValue from the loaded detail when selecting a new request', () => {
+    const { component, requestService } = setup();
+    (requestService.getRequestDetail as ReturnType<typeof vi.fn>).mockReturnValue(
+      of(makeDetail({ note: 'preloaded note' })),
+    );
+    component.noteValue = 'stale value';
     component.selectRequest(makeSummary());
-    expect(component.noteEditing()).toBe(false);
+    expect(component.noteValue).toBe('preloaded note');
   });
 });
 
@@ -546,14 +546,14 @@ describe('TokenDetailComponent — error paths', () => {
     expect(component.detailLoading()).toBe(false);
   });
 
-  it('saveNote error shows snackbar and clears noteSaving', () => {
+  it('saveNote error shows toast and clears noteSaving', () => {
     const { component, requestService, snackBar } = setup();
     requestService.updateNote.mockReturnValue(throwError(() => new Error('fail')));
     component.selectedDetail.set(makeDetail());
     component.noteValue = 'note';
     component.saveNote();
     expect(component.noteSaving()).toBe(false);
-    expect(snackBar.open).toHaveBeenCalled();
+    expect(snackBar.show).toHaveBeenCalled();
   });
 });
 

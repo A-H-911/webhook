@@ -1,119 +1,103 @@
-<!-- Generated: 2026-05-11 | Verified: Vitest 4.0.8 + @vitest/coverage-v8 4.1.5; jsdom 28.0.0; coverageThresholds enforced in angular.json; ArchUnitNET 0.13.3 + NetArchTest.eNhancedEdition 1.4.5 architecture test libs added; FluentAssertions aligned to 8.9.0 across all test projects -->
+<!-- Generated: 2026-05-13 | Files scanned: 8 .csproj + 1 package.json | Token estimate: ~850 -->
 
 # Dependencies
 
-## Backend (.NET 10)
+## Backend (.NET 10 / Hookbin.* projects)
 
-### Core Framework
-- `Microsoft.AspNetCore` — ASP.NET Core 10 Web API
-- `Microsoft.EntityFrameworkCore.SqlServer` — ORM + SQL Server provider
-- `Microsoft.EntityFrameworkCore.Design` — EF migrations tooling
+### Domain (`src/Hookbin.Domain/`)
+_No external packages — pure C#._
 
-### CQRS / Validation
-- `MediatR` — CQRS command/query bus + pipeline behaviors
-- `FluentValidation.AspNetCore` — request validation (auto-discovered in Application assembly)
+### Application (`src/Hookbin.Application/`)
+| Package | Version | Purpose |
+|---|---|---|
+| `MediatR` | 14.1.0 | CQRS pipeline (`IRequestHandler`, behaviors) |
+| `FluentValidation.AspNetCore` | 11.3.1 | Validators on commands/queries — pipeline behavior maps `ValidationException` → HTTP 422 |
 
-### Redis (Added as part of three-process split)
-- `StackExchange.Redis` — `IConnectionMultiplexer`; stream publisher, token cache, SSE bridge, stream consumer
+### Infrastructure (`src/Hookbin.Infrastructure/`)
+| Package | Version | Purpose |
+|---|---|---|
+| `Microsoft.EntityFrameworkCore.SqlServer` | 10.0.7 | EF Core SQL Server provider; `EnableRetryOnFailure(3,2s)` |
+| `Microsoft.EntityFrameworkCore.Design` | 10.0.7 | Migration tooling (also in API; **excluded** from worker `.csproj` — enforced by `OperationalSnapshotTests`) |
+| `StackExchange.Redis` | 2.8.16 | Redis client — streams, pub/sub, cache, sets |
+| `MediatR` | 14.1.0 | CQRS pipeline |
+| `MaxMind.GeoIP2` | 5.4.1 | IP-to-country lookup (GeoIp service) |
+| `Polly` | 8.6.6 | Retry policies (DB readiness) |
+| `Microsoft.Extensions.Configuration.Binder` | 10.0.0 | Options binding |
+| `Microsoft.Extensions.Hosting.Abstractions` | 10.0.0 | `IHostedService`, `BackgroundService` |
 
-### Auth
-- `Microsoft.AspNetCore.Authentication.Cookies` — cookie-based session auth
-- `BCrypt.Net-Next` — password hash verification at login
+### API (`src/Hookbin.API/`)
+| Package | Version | Purpose |
+|---|---|---|
+| `AspNetCore.HealthChecks.Redis` | 9.0.0 | `/health/ready` Redis probe |
+| `AspNetCore.HealthChecks.SqlServer` | 9.0.0 | `/health/ready` SQL probe |
+| `BCrypt.Net-Next` | 4.* | Password hash for `AUTH_PASSWORD_HASH` |
+| `Microsoft.AspNetCore.OpenApi` | 10.0.5 | OpenAPI metadata |
+| `Microsoft.EntityFrameworkCore.Design` | 10.0.7 | `dotnet ef` migration tooling |
+| `Polly` | 8.6.6 | Resilience (paired with Infrastructure usage) |
+| `Serilog.AspNetCore` | 10.0.0 | Structured logging |
+| `Serilog.Sinks.Seq` | 9.0.0 | SEQ sink |
+| `Swashbuckle.AspNetCore` | 10.1.7 | Swagger UI generator |
 
-### Resilience & Security
-- `Polly` — retry: startup DB readiness (workers, 30x exponential) + API migration (5x)
-- `Microsoft.AspNetCore.RateLimiting` — fixed-window (login 5/min, webhook-receiver configurable)
-- `Microsoft.AspNetCore.Antiforgery` — CSRF protection, X-XSRF-TOKEN validation
+### Workers (`Hookbin.StreamWorker` + `Hookbin.JobsWorker`)
+Same Polly + Serilog + HealthChecks subset as API.
+- `Microsoft.Extensions.Hosting.WindowsServices` 10.0.0 — Windows service hosting profile
+- **Excludes** `Microsoft.EntityFrameworkCore.Design` (asserted by `OperationalSnapshotTests`)
 
-### Health Checks
-- `AspNetCore.HealthChecks.SqlServer` — SQL ping for /health/ready (all three units)
-- `AspNetCore.HealthChecks.Redis` — Redis ping for /health/ready (StreamWorker only)
-- `Microsoft.Extensions.Hosting.WindowsServices` — Windows Service SCM support (workers)
+### Test Projects (`tests/`)
+| Project | Key packages |
+|---|---|
+| `Hookbin.UnitTests` | xUnit 2.9.3, NSubstitute, FluentAssertions 8.9.0 |
+| `Hookbin.IntegrationTests` | xUnit, `Microsoft.AspNetCore.Mvc.Testing` 10.0.7, `Testcontainers.MsSql` 4.4.0, `Testcontainers.Redis` 4.4.0, `StackExchange.Redis` 2.8.16, `BCrypt.Net-Next`, FluentAssertions 8.9.0 |
+| `Hookbin.ArchitectureTests` | xUnit 2.9.3, `TngTech.ArchUnitNET` 0.13.3 + `.xUnit` 0.13.3, `NetArchTest.eNhancedEdition` 1.4.5, FluentAssertions 8.9.0 |
+| `Hookbin.E2ETests` | xUnit 2.9.3, `Microsoft.Playwright` 1.52.0, coverlet 6.0.4 |
 
-### Observability
-- `Serilog.AspNetCore` — structured logging
-- `Serilog.Sinks.Seq` — log shipping to SEQ
-- `Microsoft.AspNetCore.Diagnostics.HealthChecks` — /health/live + /health/ready
+`Microsoft.NET.Test.Sdk` 17.14.1 and `xunit.runner.visualstudio` 3.1.4 across all test projects.
 
-### Testing
-- `xUnit` — test framework (unit + integration + E2E + architecture)
-- `FluentAssertions` 8.9.0 — assertion library (aligned across all 3 test projects: UnitTests, IntegrationTests, E2ETests)
-- `NSubstitute` — mocking (unit tests)
-- `Testcontainers.MsSql` — real SQL Server 2022 in integration tests
-- `Microsoft.AspNetCore.Mvc.Testing` — `WebApplicationFactory<Program>`
-- `Microsoft.Playwright` — headless Chromium E2E tests
-- `TngTech.ArchUnitNET` 0.13.3 — layer dependency rules, CQRS convention rules, sealedness checks (CLR namespace: `ArchUnitNET.*`)
-- `TngTech.ArchUnitNET.xUnit` 0.13.1 — xUnit `.Check()` adapter for ArchUnitNET
-- `NetArchTest.eNhancedEdition` 1.4.5 — folder-to-namespace alignment (`HaveSourceFilePathMatchingNamespace`)
+**Mutation testing (dev tool, not in csproj):** `dotnet-stryker` 4.14.1 — Stryker.NET. Run via `dotnet stryker --project Hookbin.<X>.csproj`. Results: `StrykerOutput/<timestamp>/reports/mutation-report.html`.
 
-## Frontend (Angular 21)
+## Frontend (Angular 21 — `frontend/hookbin-spa/`)
 
-### Core
-- `@angular/core` 21.x — standalone components, signals
-- `@angular/router` — lazy-loaded routes
-- `@angular/common/http` — `HttpClient` + interceptors
-- `@angular/platform-browser` — `provideAnimationsAsync`
+### Runtime
+| Package | Version | Purpose |
+|---|---|---|
+| `@angular/core` (+ animations, common, compiler, forms, platform-browser, router) | ^21.2.0 | Angular framework |
+| `@angular/cdk` | ^21.2.9 | CDK Overlay — backs custom `ModalService` (Angular Material removed) |
+| `rxjs` | ~7.8.0 | Reactive streams (HttpClient, SSE wrapper) |
+| `tslib` | ^2.3.0 | TypeScript runtime helpers |
 
-### UI
-- `@angular/material` — mat-dialog, mat-list, mat-table, mat-paginator, mat-toolbar
+### Dev
+| Package | Version | Purpose |
+|---|---|---|
+| `@angular/build` + `@angular/cli` | ^21.2.9 | Angular build system |
+| `@angular/compiler-cli` | ^21.2.0 | AOT compilation |
+| `vitest` | ^4.0.8 | Test runner (Jasmine/Karma removed) |
+| `@vitest/coverage-v8` | ^4.1.5 | V8 coverage (gates 80/75/76/80 line/branch/function/statement) |
+| `jsdom` | ^28.0.0 | DOM environment for Vitest |
+| `prettier` | ^3.8.1 | Code formatter |
+| `typescript` | ~5.9.2 | TypeScript compiler |
 
-### Build / Dev
-- `@angular/cli` — `ng serve` (proxy to :8080), `ng build`
-- `@angular/build` — esbuild-based builder
+**Removed since prior codemap:** `@angular/material`, `@angular/material-components-web`, `karma`, `jasmine-core`, `@types/jasmine`, `@angular-devkit/build-angular` (replaced by `@angular/build`).
 
-### Testing
-- `Vitest` ^4.0.8 — unit test runner via `@angular/build:unit-test` (`npm test`)
-- `@vitest/coverage-v8` ^4.1.5 — V8 coverage provider (80% line/branch/function thresholds in `angular.json`)
-- `jsdom` ^28.0.0 — DOM environment for component tests
-- Coverage thresholds: 80% statements/functions/lines, 75% branches (enforced in `angular.json > coverageThresholds`)
+## Docker Compose Services (`docker-compose.yml`)
+| Service | Image / build | Notes |
+|---|---|---|
+| `api` | `./Dockerfile` (PROJECT_NAME=Hookbin.API) | runs migrations on startup |
+| `stream-worker` | `./Dockerfile` (PROJECT_NAME=Hookbin.StreamWorker) | `HOOKBIN_WORKER_ID=stream-worker-1` |
+| `jobs-worker` | `./Dockerfile` (PROJECT_NAME=Hookbin.JobsWorker) | `deploy: { replicas: 1 }` |
+| `frontend` | `docker/frontend/Dockerfile` | nginx serving Angular bundle + reverse-proxy |
+| `sqlserver` | `docker/sqlserver/Dockerfile` (mcr.microsoft.com/mssql/server:2022-latest base) | custom entrypoint runs `init.sql` |
+| `redis` | `redis:7-alpine` | bind to 127.0.0.1 |
+| `seq` | `datalust/seq:latest` | ingest 5341, UI 5342 (both localhost only) |
+| `ngrok` | `ngrok/ngrok:latest` (override only) | dev-only tunnel |
 
-## Infrastructure Services
+## External Services
+| Service | Use | Where |
+|---|---|---|
+| MaxMind GeoLite2 | IP-to-country in `IGeoIpService` | Optional — `MAXMIND_DB_PATH` env |
+| ngrok | Public webhook URLs in dev | `docker-compose.ngrok.yml` override |
+| Shields.io | README tech badges | `https://img.shields.io/badge/...` |
 
-| Service | Image | Host Port | Purpose |
-|---------|-------|-----------|---------|
-| `api` | Custom .NET (`PROJECT_NAME=Hookbin.API`) | 8080 | Backend API + SSE fan-out |
-| `stream-worker` | Custom .NET (`PROJECT_NAME=Hookbin.StreamWorker`) | none | Redis stream consumer → SQL persist |
-| `jobs-worker` | Custom .NET (`PROJECT_NAME=Hookbin.JobsWorker`) | none | Retention cleanup (single replica) |
-| `sqlserver` | Custom (SQL Server 2022) | 1433 | Primary data store |
-| `redis` | `redis:7-alpine` | 6379 (localhost only) | Stream + pub/sub + token cache |
-| `seq` | `datalust/seq:latest` | 5341 (ingest), 5342 (UI) | Structured log aggregation |
-| `frontend` | Custom nginx | 8088 | Static SPA + reverse proxy |
-
-**Runtime image:** `mcr.microsoft.com/dotnet/aspnet:10.0` — `curl` installed via `apt-get` for Docker health checks.
-**Dockerfile:** Parameterized with `ARG PROJECT_NAME=Hookbin.API` — single file builds all three .NET services.
-
-## Tools
-
-### RotatePassword
-- CLI for generating BCrypt password hashes
-- Usage: `dotnet run --project tools/RotatePassword -- --password 'mypassword'`
-- Output: BCrypt hash (starts with `$2`)
-- Warning: Single-quote the hash in `.env` — `AUTH_PASSWORD_HASH='$2b$12$...'`
-  Dollar signs followed by letters (e.g. `$fekMo4`) are interpolated as variables by Docker Compose
-
-### Architecture Test Scripts
-- `scripts/run-arch-tests.ps1` — PowerShell 7+ (cross-OS: Windows, Linux, macOS); runs `dotnet test tests/Hookbin.ArchitectureTests/`
-- `scripts/run-arch-tests.sh` — Bash (Linux, macOS, Git Bash on Windows); same command
-
-## Key Config / Env
-```
-HOOKBIN_BASE_URL          — public base URL for webhook URLs (empty in appsettings.json → validator fires)
-                            Dev:   appsettings.Development.json → http://localhost:8080
-                            Local: set in .env → http://localhost:8088
-                            ngrok: set in .env → https://your-domain.ngrok.app
-
-AUTH_USERNAME             — single admin username
-AUTH_PASSWORD_HASH        — BCrypt hash, single-quoted in .env to prevent $ interpolation
-AUTH_SESSION_HOURS        — cookie sliding expiry (default 8)
-CORS_ALLOWED_ORIGINS      — comma-separated origins (dev: http://localhost:4200)
-
-HOOKBIN_WORKER_ID         — StreamWorker Redis consumer group name
-                            Compose: stream-worker-1 | Fallback: consumer-{MachineName}
-                            Must be stable across restarts — changing it orphans PEL entries
-
-ConnectionStrings__WebhookDb  — MSSQL connection string
-ConnectionStrings__Redis      — Redis host:port (e.g. redis:6379)
-Webhook:RetentionDays         — request retention in days (default 7)
-Webhook:MaxRequestSizeMb      — Kestrel body size limit, API only (default 5)
-Webhook:ReceiverRateLimitPerSecond — webhook receiver rate limit (default 5/sec)
-```
+## Versions Snapshot (2026-05-13)
+- .NET SDK preview: 10.0.300-preview.0.26177.108 (`NETSDK1057` warning expected)
+- Node `packageManager`: npm@11.12.1
+- All `Hookbin.*` projects target `net10.0`

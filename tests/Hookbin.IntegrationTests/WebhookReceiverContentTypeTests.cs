@@ -23,7 +23,7 @@ public sealed class WebhookReceiverContentTypeTests(FormConsumingWebAppFactory f
 
     private async Task<(string tokenId, string webhookToken)> CreateTokenAsync()
     {
-        var response = await _client.PostAsJsonAsync("/api/tokens", new { description = "content-type-test" });
+        var response = await _client.PostAsJsonAsync("/api/tokens", new { name = "content-type-test" });
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = body.GetProperty("id").GetString()!;
         var url = body.GetProperty("webhookUrl").GetString()!;
@@ -136,5 +136,78 @@ public sealed class WebhookReceiverContentTypeTests(FormConsumingWebAppFactory f
         var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
         var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         list.GetProperty("total").GetInt32().Should().BeGreaterThan(0, "inactive token requests must be persisted");
+    }
+
+    [Fact]
+    public async Task Receiver_TextPlainBody_StoredVerbatim()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+
+        var content = new StringContent("plain text payload\nline 2", Encoding.UTF8, "text/plain");
+        var response = await _client.PostAsync($"/webhook/{webhookToken}", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = await GetFirstRequestDetailAsync(tokenId);
+        detail.GetProperty("body").GetString().Should().Be("plain text payload\nline 2");
+        detail.GetProperty("isBodyBase64").GetBoolean().Should().BeFalse();
+        detail.GetProperty("contentType").GetString().Should().StartWith("text/plain");
+    }
+
+    [Fact]
+    public async Task Receiver_XmlBody_StoredVerbatim()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+
+        var xml = "<event><type>push</type></event>";
+        var content = new StringContent(xml, Encoding.UTF8, "application/xml");
+        var response = await _client.PostAsync($"/webhook/{webhookToken}", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = await GetFirstRequestDetailAsync(tokenId);
+        detail.GetProperty("body").GetString().Should().Be(xml);
+        detail.GetProperty("isBodyBase64").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Receiver_EmptyBody_WithContentType_DoesNotThrow()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+
+        var content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+        var response = await _client.PostAsync($"/webhook/{webhookToken}", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = await GetFirstRequestDetailAsync(tokenId);
+        var bodyValue = detail.GetProperty("body");
+        // body may be null or empty string; either is acceptable
+        if (bodyValue.ValueKind == JsonValueKind.String)
+            bodyValue.GetString().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Receiver_FormEncodedBody_WithCharsetParameter_IsAccepted()
+    {
+        var (tokenId, webhookToken) = await CreateTokenAsync();
+
+        var raw = "key1=value1&key2=value2";
+        var content = new StringContent(raw, Encoding.UTF8);
+        content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-www-form-urlencoded")
+            {
+                CharSet = "utf-8"
+            };
+        var response = await _client.PostAsync($"/webhook/{webhookToken}", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = await GetFirstRequestDetailAsync(tokenId);
+        var body = detail.GetProperty("body").GetString();
+        body.Should().NotBeNull();
+        var parsed = HttpUtility.ParseQueryString(body!);
+        parsed["key1"].Should().Be("value1");
+        parsed["key2"].Should().Be("value2");
     }
 }

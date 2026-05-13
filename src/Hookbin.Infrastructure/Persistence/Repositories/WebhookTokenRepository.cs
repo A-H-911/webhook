@@ -19,6 +19,9 @@ internal sealed class WebhookTokenRepository : IWebhookTokenRepository
     public Task<WebhookToken?> GetByTokenIncludingInactiveAsync(Guid token, CancellationToken ct = default)
         => _db.WebhookTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Token == token, ct);
 
+    public Task<WebhookToken?> GetByIdIncludingInactiveAsync(Guid id, CancellationToken ct = default)
+        => _db.WebhookTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id, ct);
+
     public async Task<IReadOnlyList<WebhookToken>> GetAllActiveAsync(CancellationToken ct = default)
         => await _db.WebhookTokens
                     .AsNoTracking()

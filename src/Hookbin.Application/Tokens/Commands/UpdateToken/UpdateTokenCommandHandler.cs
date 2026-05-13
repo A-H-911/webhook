@@ -15,7 +15,10 @@ internal sealed class UpdateTokenCommandHandler(
 {
     public async Task<TokenDto?> Handle(UpdateTokenCommand request, CancellationToken cancellationToken)
     {
-        var token = await repository.GetByIdAsync(request.Id, cancellationToken);
+        // GetByIdIncludingInactiveAsync (not GetByIdAsync) so admins can reactivate a
+        // previously-deactivated token. GetByIdAsync filters IsActive=false out, which
+        // would silently turn the PUT into a 404 for any deactivated token.
+        var token = await repository.GetByIdIncludingInactiveAsync(request.Id, cancellationToken);
         if (token is null)
             return null;
 

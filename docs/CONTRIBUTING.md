@@ -1,6 +1,8 @@
 # Contributing Guide
 
-**Last Updated:** 2026-05-11 (architecture tests added as fourth test tier)
+<!-- AUTO-GENERATED:HEADER START -->
+**Last Updated:** 2026-05-13 (zero-trust audit + mutation testing baselines; UI moved from Angular Material → custom CDK Overlay modal; test count 782; E2E selector hardening; CSRF X-XSRF-TOKEN guidance added)
+<!-- AUTO-GENERATED:HEADER END -->
 
 This guide explains how to set up the development environment, run tests, and submit pull requests to the Hookbin project.
 
@@ -116,7 +118,7 @@ pwsh scripts/run-arch-tests.ps1
 bash scripts/run-arch-tests.sh
 ```
 
-26 rules verified by assembly reflection — layer dependencies, CQRS naming conventions, entity immutability, repository placement, folder-to-namespace alignment. Takes ~1 second. **No Docker required.** Run this before pushing any structural change.
+47 rules verified by assembly reflection — layer dependencies, CQRS naming conventions, entity immutability, repository placement, folder-to-namespace alignment, plus **DANGER ZONE structural guards** (private-set `[JsonInclude]`, repository `.AsNoTracking`, worker `MigrateAsync` exclusion, `[AllowAnonymous]` on webhook + health) and **operational snapshots** (docker-compose `jobs-worker.deploy.replicas: 1`, `stream-worker.HOOKBIN_WORKER_ID` stable, nginx SSE `proxy_buffering off`, worker `.csproj` excludes `EFCore.Design`). Takes ~1 second. **No Docker required.** Run this before pushing any structural change.
 
 ### Run Unit Tests (no Docker required)
 
@@ -124,7 +126,7 @@ bash scripts/run-arch-tests.sh
 dotnet test tests/Hookbin.UnitTests/
 ```
 
-Fast feedback loop — domain logic, CQRS handlers, in-memory services. ~310 tests, takes ~10 seconds.
+Fast feedback loop — domain logic, CQRS handlers, in-memory services. ~377 tests, takes ~10 seconds.
 
 ### Run Integration Tests (Docker required)
 
@@ -132,7 +134,17 @@ Fast feedback loop — domain logic, CQRS handlers, in-memory services. ~310 tes
 dotnet test tests/Hookbin.IntegrationTests/
 ```
 
-Testcontainers pulls a SQL Server 2022 container automatically. Ensure Docker is running. ~59 tests, takes ~60 seconds.
+Testcontainers pulls SQL Server 2022 and Redis 7 containers automatically. Ensure Docker is running. ~85 tests, takes ~90 seconds.
+
+### Run Mutation Tests (optional, deeper feedback)
+
+```bash
+dotnet tool install -g dotnet-stryker            # one-time
+dotnet stryker --project src/Hookbin.Domain/Hookbin.Domain.csproj --solution Hookbin.slnx --reporter html
+dotnet stryker --project src/Hookbin.Application/Hookbin.Application.csproj --solution Hookbin.slnx --reporter html
+```
+
+Mutation score gate: **≥ 60%** on `Hookbin.Domain` and `Hookbin.Application` (current 86% / 90%). HTML reports land in `StrykerOutput/<timestamp>/reports/mutation-report.html`. `Hookbin.Infrastructure` mutation score (~53%) is intentionally below the gate because most infrastructure code is exercised via integration tests rather than unit tests — see `docs/AUDIT/BASELINE.md`.
 
 ### Run All Backend Tests with Coverage
 
@@ -228,7 +240,7 @@ Output is in `dist/`.
 npm test
 ```
 
-Runs Vitest. ~118 tests, covers components, services, and Angular utilities.
+Runs Vitest. ~209 tests, covers components, services, pipes, modal/toast infra (custom CDK Overlay — Angular Material is fully removed), and DANGER ZONE invariants (interceptor `/api/auth/*` exclusion, SSE `withCredentials`, SSE reconnect).
 
 ### Coverage Report
 
@@ -254,14 +266,19 @@ Or configure your editor to format on save.
 
 ### Testing Strategy
 
-The project uses a **4-tier test pyramid**:
+The project uses a **5-tier test pyramid**:
 
-1. **Architecture Tests** (26 rules) — Assembly reflection; no infrastructure; fastest (~1s)
-2. **Unit Tests** (310 backend tests) — Fast, isolated, no infrastructure (~10s)
-3. **Integration Tests** (59 backend tests) — Real SQL Server container via Testcontainers; WebApplicationFactory (~60s)
-4. **E2E Tests** (48 tests via Playwright) — Full stack running; user workflows end-to-end (~3min)
+<!-- AUTO-GENERATED:TEST-COUNTS START -->
+1. **Architecture Tests** (47 rules) — Assembly reflection + file content snapshots; no infrastructure; fastest (~1s)
+2. **Unit Tests** (377 backend + 209 frontend) — Fast, isolated, no infrastructure (~15s combined)
+3. **Integration Tests** (85 backend) — Real SQL Server + Redis containers via Testcontainers; WebApplicationFactory (~90s)
+4. **E2E Tests** (64 via Playwright) — Full stack running; user workflows end-to-end (~30s with shared fixture)
+5. **Mutation Tests** (optional, Stryker.NET) — Falsifiable pin verification; gate ≥60% on Domain + Application
 
-All tests must pass before submitting a PR.
+All non-mutation tests must pass before submitting a PR. Mutation tests are advisory but recommended when changing CQRS handler logic, domain invariants, or serialization contracts.
+
+**Total tests: 782 (architecture + unit + integration + E2E + frontend), all green at 2026-05-13.**
+<!-- AUTO-GENERATED:TEST-COUNTS END -->
 
 ### Architecture Tests (Fastest — 1 second)
 
@@ -321,7 +338,7 @@ pwsh tests/Hookbin.E2ETests/bin/Debug/net10.0/playwright.ps1 install
 docker compose up -d
 
 # Step 4: Run E2E tests
-E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/Hookbin.E2ETests/
 ```
 
 Or use the rebuild script (recommended):
@@ -333,7 +350,7 @@ pwsh scripts/rebuild-and-wait.ps1
 Then run tests:
 
 ```bash
-E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
+E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/Hookbin.E2ETests/
 ```
 
 **When to add E2E tests:**
@@ -458,7 +475,7 @@ Before submitting a PR, verify:
 - [ ] **E2E tests pass:** If touching user workflows
   ```bash
   pwsh scripts/rebuild-and-wait.ps1
-  E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=admin dotnet test tests/Hookbin.E2ETests/
+  E2E_BASE_URL=http://localhost:8088 E2E_AUTH_PASSWORD=Admin123! dotnet test tests/Hookbin.E2ETests/
   ```
 - [ ] **API contract updated:** If adding/changing endpoints
   - Update README.md §7.3 API Contract table
@@ -503,6 +520,39 @@ Same pattern as commands:
 3. Add `<Name>QueryHandler.cs` (implements `IRequestHandler<,TResult>`)
 4. Validator is optional for read-only queries
 5. Add tests
+
+### Adding a Modal/Dialog (Angular)
+
+Angular Material is removed — dialogs use the custom `ModalService` over `@angular/cdk` Overlay.
+
+1. Create a standalone component implementing the dialog template (use `.dialog`, `.dialog-header`, `.dialog-body`, `.dialog-footer` CSS conventions; see `src/app/shared/confirm-dialog/`).
+2. Inject `ModalRef` via `inject<ModalRef<TResult>>(MODAL_REF)` and call `this.ref.close(result)` on confirm/cancel.
+3. For dialogs that need input data, also inject `MODAL_DATA`.
+4. To open it from a component: `inject(ModalService).open(MyDialogComponent, { data: { ... } })`.
+5. **Cancel must close with `null`, not empty string** — callers use `result == null` to detect cancellation. Use `[mat-dialog-close]="null"` on the Cancel button.
+6. E2E selector for the dialog container: `.modal-panel` (NOT `mat-dialog-container`).
+
+### Calling the API from non-Angular Clients (CSRF)
+
+The API uses double-submit-cookie CSRF protection. **All state-changing requests** (`POST`/`PUT`/`PATCH`/`DELETE`) require the `X-XSRF-TOKEN` header to match the `XSRF-TOKEN` cookie. Angular's `HttpClient` handles this automatically.
+
+For raw `fetch`, curl scripts, Postman, etc.:
+
+```js
+// 1. Make any authenticated GET request first — the response sets XSRF-TOKEN cookie
+await fetch('/api/tokens', { credentials: 'include' });
+// 2. Read the cookie
+const xsrf = document.cookie.match(/XSRF-TOKEN=([^;]+)/)?.[1];
+// 3. Include it as a header on writes
+await fetch('/api/tokens', {
+  method: 'POST',
+  credentials: 'include',
+  headers: { 'content-type': 'application/json', 'X-XSRF-TOKEN': decodeURIComponent(xsrf) },
+  body: JSON.stringify({ name: 'test' })
+});
+```
+
+The unauthenticated webhook receiver (`POST /webhook/{guid}`) does **not** require CSRF — it's `[AllowAnonymous]`.
 
 ### Modifying the Database Schema
 

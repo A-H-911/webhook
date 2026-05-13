@@ -11,7 +11,7 @@ public sealed class SseApiTests(WebAppFactory factory) : IClassFixture<WebAppFac
     [Fact]
     public async Task SseEndpoint_Returns200_WithEventStreamContentType()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "sse-test" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "sse-test" });
         var body = await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(
             new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
         var tokenId = body.GetProperty("id").GetString();

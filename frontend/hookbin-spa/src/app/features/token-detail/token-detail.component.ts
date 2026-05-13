@@ -1,46 +1,32 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy, DestroyRef } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, Subscription } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
-import { MatInputModule } from '@angular/material/input';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatSnackBar } from '@angular/material/snack-bar';
-import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatDividerModule } from '@angular/material/divider';
-import { MatDialog } from '@angular/material/dialog';
-
 import { TokenService } from '../../core/services/token.service';
 import { RequestService } from '../../core/services/request.service';
 import { SseService } from '../../core/services/sse.service';
+import { BreadcrumbService } from '../../core/services/breadcrumb.service';
 import { Token, SetCustomResponseDto } from '../../core/models/token.model';
 import { RequestSummary } from '../../core/models/request-summary.model';
 import { RequestDetail } from '../../core/models/request-detail.model';
 import { CustomResponseDialogComponent } from '../custom-response/custom-response-dialog.component';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
+import { ModalService } from '../../shared/modal/modal.service';
+import { ToastService } from '../../shared/toast/toast.service';
+import { JsonTreeComponent } from '../../shared/json-tree/json-tree.component';
+import { JsonHighlightPipe } from '../../shared/json-highlight/json-highlight.pipe';
+
+type BodyViewMode = 'tree' | 'pretty' | 'raw';
 
 const PAGE_SIZE = 20;
 
 @Component({
   selector: 'app-token-detail',
   standalone: true,
-  imports: [
-    RouterLink,
-    DatePipe,
-    FormsModule,
-    MatButtonModule,
-    MatIconModule,
-    MatInputModule,
-    MatFormFieldModule,
-    MatProgressSpinnerModule,
-    MatTooltipModule,
-    MatDividerModule,
-  ],
+  imports: [RouterLink, DatePipe, NgClass, FormsModule, JsonTreeComponent, JsonHighlightPipe],
   templateUrl: './token-detail.component.html',
   styleUrl: './token-detail.component.scss',
 })
@@ -50,9 +36,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   private readonly tokenService = inject(TokenService);
   private readonly requestService = inject(RequestService);
   private readonly sseService = inject(SseService);
-  private readonly snackBar = inject(MatSnackBar);
-  private readonly dialog = inject(MatDialog);
+  private readonly modal = inject(ModalService);
+  private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly breadcrumb = inject(BreadcrumbService);
 
   private sseSub?: Subscription;
   private readonly searchSubject = new Subject<string>();
@@ -64,12 +51,35 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   readonly detailLoading = signal(false);
   readonly connected = signal(false);
 
+  readonly selectedMethods = signal<string[]>([]);
+  readonly selectedStatusGroups = signal<number[]>([]);
+  readonly newRequestIds = new Set<string>();
+
+  readonly METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+  readonly STATUS_GROUPS = [2, 3, 4, 5];
+
   page = 1;
   readonly total = signal(0);
   search = '';
 
   readonly totalPages = computed(() => Math.ceil(this.total() / PAGE_SIZE) || 1);
   readonly localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  readonly parsedHeaders = computed<{ name: string; value: string }[]>(() => {
+    const raw = this.selectedDetail()?.headers;
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string | string[]>;
+      return Object.entries(parsed).flatMap(([name, value]) => {
+        const vals = Array.isArray(value) ? value : [value];
+        return vals.map((v) => ({ name, value: v }));
+      });
+    } catch {
+      return [];
+    }
+  });
+
+  readonly headerCount = computed(() => this.parsedHeaders().length);
 
   readonly parsedQueryParams = computed<[string, string][]>(() => {
     const qs = this.selectedDetail()?.queryString;
@@ -104,8 +114,41 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   });
 
   noteValue = '';
-  readonly noteEditing = signal(false);
   readonly noteSaving = signal(false);
+  readonly bodyViewMode = signal<BodyViewMode>('tree');
+  readonly bodySearch = signal('');
+
+  readonly parsedBody = computed<unknown | null>(() => {
+    const detail = this.selectedDetail();
+    if (!detail || detail.body === null || detail.body === undefined) return null;
+    let raw = detail.body;
+    if (detail.isBodyBase64) {
+      try {
+        const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+        raw = new TextDecoder('utf-8').decode(bytes);
+      } catch {
+        return null;
+      }
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  });
+
+  readonly defaultExpandPath = computed<string>(() => {
+    const body = this.parsedBody();
+    if (!body || typeof body !== 'object') return '';
+    if (Array.isArray(body)) return '';
+    if ('error' in (body as Record<string, unknown>)) return '/error';
+    return '';
+  });
+
+  onBodySearchChange(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.bodySearch.set(target?.value ?? '');
+  }
 
   get tokenId(): string {
     return this.route.snapshot.paramMap.get('id') ?? '';
@@ -113,7 +156,10 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.tokenService.getToken(this.tokenId).subscribe({
-      next: (t) => this.token.set(t),
+      next: (t) => {
+        this.token.set(t);
+        this.breadcrumb.setToken(t.name);
+      },
       error: () => this.router.navigate(['/dashboard']),
     });
     this.loadRequests();
@@ -130,6 +176,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sseSub?.unsubscribe();
+    this.breadcrumb.clear();
   }
 
   private connectSse(): void {
@@ -141,10 +188,11 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
           this.connected.set(false);
         } else if (event.eventType === 'new-request') {
           this.connected.set(true);
+          this.newRequestIds.add(event.data.id);
           this.requests.update((list) => [event.data, ...list]);
           this.total.update((n) => n + 1);
         } else if (event.eventType === 'token-deleted') {
-          this.snackBar.open('This webhook URL was deleted', 'OK', { duration: 4000 });
+          this.toast.show('This webhook URL was deleted', 4000);
           this.router.navigate(['/dashboard']);
         }
       },
@@ -153,16 +201,55 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     });
   }
 
+  toggleMethod(method: string): void {
+    this.selectedMethods.update((list) =>
+      list.includes(method) ? list.filter((m) => m !== method) : [...list, method],
+    );
+    this.page = 1;
+    this.loadRequests();
+  }
+
+  toggleStatusGroup(group: number): void {
+    this.selectedStatusGroups.update((list) =>
+      list.includes(group) ? list.filter((g) => g !== group) : [...list, group],
+    );
+    this.page = 1;
+    this.loadRequests();
+  }
+
+  isNewRow(id: string): boolean {
+    return this.newRequestIds.has(id);
+  }
+
+  statusGroupLabel(group: number): string {
+    return `${group}xx`;
+  }
+
+  statusClass(code: number | null | undefined): string {
+    if (!code) return '';
+    const g = Math.floor(code / 100);
+    return `s${g}`;
+  }
+
   loadRequests(): void {
     this.loading.set(true);
-    this.requestService.getRequests(this.tokenId, this.page, PAGE_SIZE, this.search).subscribe({
-      next: (result) => {
-        this.requests.set(result.items);
-        this.total.set(result.total);
-        this.loading.set(false);
-      },
-      error: () => this.loading.set(false),
-    });
+    this.requestService
+      .getRequests(
+        this.tokenId,
+        this.page,
+        PAGE_SIZE,
+        this.search,
+        this.selectedMethods(),
+        this.selectedStatusGroups(),
+      )
+      .subscribe({
+        next: (result) => {
+          this.requests.set(result.items);
+          this.total.set(result.total);
+          this.loading.set(false);
+        },
+        error: () => this.loading.set(false),
+      });
   }
 
   onSearchChange(term: string): void {
@@ -186,52 +273,44 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   selectRequest(req: RequestSummary): void {
     this.detailLoading.set(true);
     this.selectedDetail.set(null);
-    this.noteEditing.set(false);
+    this.noteValue = '';
+    this.bodyViewMode.set('tree');
     this.requestService.getRequestDetail(this.tokenId, req.id).subscribe({
       next: (detail) => {
         this.selectedDetail.set(detail);
+        this.noteValue = detail.note ?? '';
         this.detailLoading.set(false);
       },
       error: () => this.detailLoading.set(false),
     });
   }
 
-  startNoteEdit(): void {
-    this.noteValue = this.selectedDetail()?.note ?? '';
-    this.noteEditing.set(true);
-  }
-
-  cancelNoteEdit(): void {
-    this.noteEditing.set(false);
-  }
-
   saveNote(): void {
     const detail = this.selectedDetail();
     if (!detail) return;
     const note = this.noteValue.trim() || null;
+    if (note === (detail.note ?? null)) return; // skip if unchanged
     this.noteSaving.set(true);
     this.requestService.updateNote(this.tokenId, detail.id, note).subscribe({
       next: () => {
         this.selectedDetail.update((d) => (d ? { ...d, note } : d));
         this.noteSaving.set(false);
-        this.noteEditing.set(false);
       },
       error: () => {
         this.noteSaving.set(false);
-        this.snackBar.open('Failed to save note', 'OK', { duration: 3000 });
+        this.toast.show('Failed to save note');
       },
     });
   }
 
   deleteRequest(req: RequestSummary, event: MouseEvent): void {
     event.stopPropagation();
-    this.dialog
-      .open(ConfirmDialogComponent, {
-        width: '340px',
+    this.modal
+      .open<ConfirmDialogComponent, boolean | null>(ConfirmDialogComponent, {
         data: { message: 'Delete this request?', confirmLabel: 'Delete' },
       })
       .afterClosed()
-      .subscribe((confirmed: boolean) => {
+      .subscribe((confirmed) => {
         if (!confirmed) return;
         this.requestService.deleteRequest(this.tokenId, req.id).subscribe(() => {
           this.requests.update((list) => list.filter((r) => r.id !== req.id));
@@ -248,37 +327,35 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   }
 
   clearAll(): void {
-    this.dialog
-      .open(ConfirmDialogComponent, {
-        width: '340px',
+    this.modal
+      .open<ConfirmDialogComponent, boolean | null>(ConfirmDialogComponent, {
         data: {
           message: 'Clear all captured requests for this webhook URL?',
           confirmLabel: 'Clear',
         },
       })
       .afterClosed()
-      .subscribe((confirmed: boolean) => {
+      .subscribe((confirmed) => {
         if (!confirmed) return;
         this.requestService.clearRequests(this.tokenId).subscribe(() => {
           this.requests.set([]);
           this.total.set(0);
           this.selectedDetail.set(null);
-          this.snackBar.open('All requests cleared', 'OK', { duration: 3000 });
+          this.toast.show('All requests cleared');
         });
       });
   }
 
   deleteToken(): void {
-    this.dialog
-      .open(ConfirmDialogComponent, {
-        width: '340px',
+    this.modal
+      .open<ConfirmDialogComponent, boolean | null>(ConfirmDialogComponent, {
         data: {
           message: 'Delete this webhook URL and all its requests permanently?',
           confirmLabel: 'Delete',
         },
       })
       .afterClosed()
-      .subscribe((confirmed: boolean) => {
+      .subscribe((confirmed) => {
         if (!confirmed) return;
         this.tokenService
           .deleteToken(this.tokenId)
@@ -289,23 +366,23 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   openCustomResponse(): void {
     const t = this.token();
     if (!t) return;
-    const ref = this.dialog.open(CustomResponseDialogComponent, {
-      width: '560px',
-      data: t.customResponse,
-    });
-    ref
+    this.modal
+      .open<
+        CustomResponseDialogComponent,
+        { action: 'save'; dto: SetCustomResponseDto } | { action: 'reset' } | null
+      >(CustomResponseDialogComponent, { data: t.customResponse })
       .afterClosed()
-      .subscribe((result?: { action: 'save'; dto: SetCustomResponseDto } | { action: 'reset' }) => {
+      .subscribe((result) => {
         if (!result) return;
         if (result.action === 'reset') {
           this.tokenService.resetCustomResponse(this.tokenId).subscribe(() => {
             this.token.update((tok) => (tok ? { ...tok, customResponse: null } : tok));
-            this.snackBar.open('Custom response removed', 'OK', { duration: 3000 });
+            this.toast.show('Custom response removed');
           });
         } else {
           this.tokenService.setCustomResponse(this.tokenId, result.dto).subscribe(() => {
             this.token.update((tok) => (tok ? { ...tok, customResponse: { ...result.dto } } : tok));
-            this.snackBar.open('Custom response saved', 'OK', { duration: 3000 });
+            this.toast.show('Custom response saved');
           });
         }
       });
@@ -315,10 +392,8 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
     const url = this.token()?.webhookUrl ?? '';
     navigator.clipboard
       .writeText(url)
-      .then(() => this.snackBar.open('URL copied', 'OK', { duration: 2000 }))
-      .catch(() =>
-        this.snackBar.open('Copy failed — please copy manually', 'OK', { duration: 3000 }),
-      );
+      .then(() => this.toast.show('URL copied', 2000))
+      .catch(() => this.toast.show('Copy failed — please copy manually'));
   }
 
   formatHeaders(raw: string): string {

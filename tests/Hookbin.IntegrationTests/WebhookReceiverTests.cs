@@ -15,7 +15,7 @@ public sealed class WebhookReceiverTests(WebAppFactory factory) : IClassFixture<
 
     private async Task<(string tokenId, string webhookToken)> CreateTokenAsync()
     {
-        var response = await _client.PostAsJsonAsync("/api/tokens", new { description = "receiver-test" });
+        var response = await _client.PostAsJsonAsync("/api/tokens", new { name = "receiver-test" });
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = body.GetProperty("id").GetString()!;
         var url = body.GetProperty("webhookUrl").GetString()!;
@@ -104,7 +104,7 @@ public sealed class WebhookReceiverTests(WebAppFactory factory) : IClassFixture<
 
         // Reactivate so we can read the requests back via the API
         await _client.PutAsJsonAsync($"/api/tokens/{tokenId}",
-            new { description = "reactivated", isActive = true });
+            new { name = "receiver-test", description = "reactivated", isActive = true });
 
         var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
         listResponse.StatusCode.Should().Be(HttpStatusCode.OK);

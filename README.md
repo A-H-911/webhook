@@ -1,6 +1,40 @@
-# Hookbin
+<p align="center">
+  <a href="#">
+    <img src="docs/assets/logo.svg" width="128" alt="Hookbin logo" />
+  </a>
+</p>
 
-A self-hosted webhook inspection and debugging tool. Generate unique URLs, send HTTP requests to them from any source, and inspect every captured request in real time — similar to webhook.site but running entirely on your own infrastructure.
+<h1 align="center">Hookbin</h1>
+
+<p align="center">
+  <em>Self-hosted webhook inspection and debugging — capture, inspect, and replay every incoming HTTP request in real time.</em>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white" alt=".NET 10" />
+  <img src="https://img.shields.io/badge/Angular-21-DD0031?logo=angular&logoColor=white" alt="Angular 21" />
+  <img src="https://img.shields.io/badge/SQL%20Server-2022-CC2927?logo=microsoftsqlserver&logoColor=white" alt="SQL Server 2022" />
+  <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white" alt="Redis 7" />
+  <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/tests-726%20passing-3fb950" alt="Tests" />
+  <img src="https://img.shields.io/badge/PRs-welcome-3b82f6.svg" alt="PRs Welcome" />
+</p>
+
+<p align="center">
+  <a href="#4-quick-start">Quick Start</a>
+  ·
+  <a href="#5-architecture-overview-hld">Architecture</a>
+  ·
+  <a href="#73-api-contract">API</a>
+  ·
+  <a href="#13-testing">Testing</a>
+  ·
+  <a href="#20-troubleshooting">Troubleshooting</a>
+</p>
+
+---
+
+Hookbin is a self-hosted webhook inspection and debugging tool. Generate unique URLs, send HTTP requests to them from any source, and inspect every captured request in real time — similar to webhook.site but running entirely on your own infrastructure.
 
 ---
 

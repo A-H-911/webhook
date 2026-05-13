@@ -1,178 +1,148 @@
-<!-- Generated: 2026-05-11 | Verified: 310 unit + 26 arch + 59 integration tests; PATCH /note endpoint + SetRequestNoteCommand; GetRequestByIdQuery returns processingTimeMs + note fields; domain entity encapsulation (private setters + mutation methods); WebhookOptionsValidator moved to Hookbin.API.Options -->
+<!-- Generated: 2026-05-13 | Files scanned: 59 src + 50 tests | Token estimate: ~950 -->
 
-# Backend Architecture
+# Backend (.NET 10)
 
-## Routes → Handler Map
-
-### Auth (AllowAnonymous)
+## Solution Layout
 ```
-POST /api/auth/login        → AuthController.Login
-GET  /api/auth/me           → AuthController.Me
-POST /api/auth/logout       → AuthController.Logout
-```
-
-### Tokens (requires auth)
-```
-GET    /api/tokens                        → GetTokensQuery → GetTokensQueryHandler
-GET    /api/tokens/{id}                   → GetTokenQuery  → GetTokenQueryHandler
-POST   /api/tokens                        → CreateTokenCommand → CreateTokenCommandHandler
-PUT    /api/tokens/{id}                   → UpdateTokenCommand → UpdateTokenCommandHandler
-DELETE /api/tokens/{id}                   → DeleteTokenCommand → DeleteTokenCommandHandler
-PUT    /api/tokens/{id}/custom-response   → SetCustomResponseCommand → SetCustomResponseCommandHandler
-DELETE /api/tokens/{id}/custom-response   → ResetCustomResponseCommand → ResetCustomResponseCommandHandler
-GET    /api/tokens/{id}/sse               → SseController.Subscribe
+src/
+  Hookbin.Domain/                 Entities, value objects, repository interfaces, ISseNotifier
+  Hookbin.Application/            CQRS handlers (MediatR), DTOs, validators, behaviors, options
+  Hookbin.Infrastructure/         EF Core (MSSQL), Redis adapters, SseNotifier, background services
+  Hookbin.API/                    HTTP endpoints, middleware, options, services
+  Hookbin.StreamWorker/           Drains Redis stream → SQL → SSE pub
+  Hookbin.JobsWorker/             Retention cleanup
+tools/
+  RotatePassword/                 BCrypt hash generator CLI
 ```
 
-### Requests (requires auth, scoped to token)
+## API Routes
 ```
-GET    /api/tokens/{tokenId}/requests             → GetRequestsQuery (paginated, searchable)
-GET    /api/tokens/{tokenId}/requests/{id}        → GetRequestByIdQuery  (returns processingTimeMs + note)
-GET    /api/tokens/{tokenId}/requests/{id}/export → ExportRequestQuery → File(json)
-DELETE /api/tokens/{tokenId}/requests             → ClearRequestsCommand
-DELETE /api/tokens/{tokenId}/requests/{id}        → DeleteRequestCommand
-PATCH  /api/tokens/{tokenId}/requests/{id}/note   → SetRequestNoteCommand → SetRequestNoteCommandHandler
+AuthController              [Route("api/auth")]
+  POST   /api/auth/login            (AllowAnonymous, login rate limiter)
+  POST   /api/auth/logout
+  GET    /api/auth/me
+
+DashboardController         [Route("api/dashboard")]
+  GET    /api/dashboard/metrics
+
+InfoController              [Route("api")]
+  GET    /api/version
+
+TokensController            [Route("api/tokens")]
+  GET    /api/tokens                                    → GetTokensQuery
+  GET    /api/tokens/{id:guid}                          → GetTokenQuery
+  POST   /api/tokens                                    → CreateTokenCommand
+  PUT    /api/tokens/{id:guid}                          → UpdateTokenCommand
+  DELETE /api/tokens/{id:guid}                          → DeleteTokenCommand
+  PUT    /api/tokens/{id:guid}/custom-response          → SetCustomResponseCommand
+  DELETE /api/tokens/{id:guid}/custom-response          → ResetCustomResponseCommand
+
+RequestsController          [Route("api/tokens/{tokenId:guid}/requests")]
+  GET    .../requests                                   → GetRequestsQuery
+  GET    .../requests/{id:guid}                         → GetRequestByIdQuery
+  GET    .../requests/{id:guid}/export                  → ExportRequestQuery
+  PATCH  .../requests/{id:guid}/note                    → SetRequestNoteCommand
+  DELETE .../requests                                   → ClearRequestsCommand
+  DELETE .../requests/{id:guid}                         → DeleteRequestCommand
+
+SseController
+  GET    /api/tokens/{tokenId:guid}/sse                 → SseNotifier subscribe
+
+WebhookController           [AllowAnonymous, Route("webhook/{token:guid}")]
+  ALL (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)          → IRequestQueuePublisher.PublishAsync
 ```
 
-### Webhook Receiver (AllowAnonymous, rate-limited)
+## Middleware Pipeline (Program.cs)
 ```
-*/webhook/{token:guid}   → WebhookController.Receive (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)
-  [EnableRateLimiting("webhook-receiver")]
-  ├─ ITokenCache.GetOrLoadAsync → DB fallback (includes inactive tokens)
-  ├─ Read body: try/catch IOException → BadHttpRequestException
-  ├─ IRequestQueuePublisher.PublishAsync → XADD webhook-requests (Redis stream)
-  ├─ Active token:   return CustomResponse (or 200)
-  ├─ Inactive token: return 410 Gone (audit persisted by StreamWorker)
-  └─ Rate limited:   429 Too Many Requests
+ForwardedHeaders → GlobalExceptionMiddleware → CORS (dev only) → Static
+  → Routing → RateLimiter → Authentication → Authorization → Antiforgery → MapControllers
 ```
 
-### Health (AllowAnonymous)
+## Domain Layer (`src/Hookbin.Domain/`)
+| File | Type |
+|---|---|
+| `Entities/WebhookToken.cs` | Aggregate root; owns `CustomResponse` value object |
+| `Entities/WebhookRequest.cs` | Request entity (`[JsonInclude]` on private-set `ProcessingTimeMs`) |
+| `Entities/DashboardMetrics.cs`, `TokenPageRow.cs` | Read DTOs |
+| `ValueObjects/CustomResponse.cs` | Owned entity — `StatusCode`, `ContentType`, `Body`, `Headers` (raw JSON string) |
+| `Repositories/IWebhookTokenRepository.cs` | Read + write contract |
+| `Repositories/IWebhookRequestRepository.cs` | Read + write contract |
+| `Services/ISseNotifier.cs` | SSE fan-out interface |
+
+## Application Layer — CQRS Map (MediatR)
+**Commands** — handlers are `internal sealed`, records are `public sealed record`:
+
+| Folder | Command | Validator | Cache Invalidation |
+|---|---|---|---|
+| `Tokens/Commands/CreateToken/` | `CreateTokenCommand` | yes (name ≤80) | n/a |
+| `Tokens/Commands/UpdateToken/` | `UpdateTokenCommand` | yes | `cache.Remove(tokenId)` |
+| `Tokens/Commands/DeleteToken/` | `DeleteTokenCommand` | - | `cache.Remove(tokenId)` |
+| `Tokens/Commands/SetCustomResponse/` | `SetCustomResponseCommand` | yes (Headers JSON object) | `cache.Remove(tokenId)` |
+| `Tokens/Commands/ResetCustomResponse/` | `ResetCustomResponseCommand` | - | `cache.Remove(tokenId)` |
+| `Requests/Commands/SetRequestNote/` | `SetRequestNoteCommand` | yes (≤2000 chars) | n/a |
+| `Requests/Commands/DeleteRequest/` | `DeleteRequestCommand` | - | n/a (IDOR guarded: `WHERE TokenId=`) |
+| `Requests/Commands/ClearRequests/` | `ClearRequestsCommand` | - | n/a |
+
+**Queries:**
+| Folder | Query | Returns |
+|---|---|---|
+| `Tokens/Queries/GetToken/` | `GetTokenQuery` | `TokenDto?` |
+| `Tokens/Queries/GetTokens/` | `GetTokensQuery` | `Page<TokenListItemDto>` |
+| `Requests/Queries/GetRequests/` | `GetRequestsQuery` | `Page<RequestDto>` |
+| `Requests/Queries/GetRequestById/` | `GetRequestByIdQuery` | `WebhookRequestDetailDto?` |
+| `Requests/Queries/ExportRequest/` | `ExportRequestQuery` | byte[] JSON |
+| `Dashboard/Queries/GetDashboardMetrics/` | `GetDashboardMetricsQuery` | `DashboardMetricsDto` |
+
+## Pipeline Behaviors (`Application/Common/Behaviors/`)
+- `ValidationBehavior<TReq,TResp>` → auto-discovers `AbstractValidator<TReq>`, throws `ValidationException` (→ HTTP 422)
+- `LoggingBehavior<TReq,TResp>` → structured request/response/timing with Serilog
+
+## Infrastructure (`src/Hookbin.Infrastructure/`)
 ```
-GET /health/live   → no checks (API + StreamWorker + JobsWorker)
-GET /health/ready  → SqlServer ping [+Redis ping for StreamWorker]
+Persistence/
+  ApplicationDbContext.cs
+  Configurations/  WebhookTokenConfiguration.cs, WebhookRequestConfiguration.cs
+  Repositories/    WebhookTokenRepository.cs, WebhookRequestRepository.cs   (.AsNoTracking on reads)
+Redis/
+  RedisStreamPublisher.cs         (XADD webhook-requests)
+  RedisStreamConsumerService.cs   (XREADGROUP + PEL recovery + XACK)
+  RedisSseBridgeService.cs        (SUBSCRIBE sse:* → SseNotifier.NotifyAsync)  ← API only
+  RedisTokenCache.cs              (5min sliding, ICacheStore behind ITokenCache)
+  RedisSessionRevocationStore.cs  (logout = cluster-wide invalidation)
+Sse/SseNotifier.cs                (ConcurrentDictionary<TokenId, Channel<SseEvent>>, DropOldest)
+BackgroundServices/RetentionCleanupService.cs    (PeriodicTimer 24h, IServiceScopeFactory)
+GeoIp/MaxMindGeoIpService.cs
+Migrations/                       (5 migrations, see data.md)
 ```
 
-## Middleware Chain (ordered)
-```
-ForwardedHeaders → GlobalExceptionMiddleware → CORS → RateLimiter → Authentication → Antiforgery → Authorization
-  ├─ GlobalExceptionMiddleware: SSE guard [if (Response.HasStarted) return;]
-  ├─ RateLimiter: login (5/min), webhook-receiver (per WebhookOptions)
-  ├─ Antiforgery: X-XSRF-TOKEN required on POST/PUT/DELETE
-  └─ Authorization: fallback requires auth; [AllowAnonymous] on public routes
-```
+## API Project (`src/Hookbin.API/`)
+| Subsystem | Files |
+|---|---|
+| Entry / DI / pipeline | `Program.cs` |
+| Controllers | `Controllers/AuthController.cs`, `TokensController.cs`, `RequestsController.cs`, `SseController.cs`, `WebhookController.cs`, `DashboardController.cs`, `InfoController.cs` |
+| Middleware | `Middleware/GlobalExceptionMiddleware.cs` (HTTP-status mapping + `HasStarted` SSE guard + 401 redirect-suppress) |
+| Options | `Options/WebhookOptions.cs`, `AuthOptions.cs`, plus `IValidateOptions` validators |
+| Services | `Services/SessionRevocationStore.cs` |
 
-## Exception Handling (GlobalExceptionMiddleware)
-```
-OperationCanceledException (RequestAborted)  → silent swallow (normal SSE disconnect)
-ValidationException                          → 422 Unprocessable Entity + field errors
-BadHttpRequestException                      → status code from ex.StatusCode (400 or 413)
-Exception (unhandled)                        → 500 Internal Server Error (logged, not exposed)
+## Worker Projects
+- `src/Hookbin.StreamWorker/Program.cs` → `AddCoreInfrastructure + AddStreamWorkerInfrastructure`; Polly readiness; `/health/live` + `/health/ready`
+- `src/Hookbin.JobsWorker/Program.cs` → `AddCoreInfrastructure + AddJobsWorkerInfrastructure`; SQL-only readiness
 
-SSE Safety: writes guarded by context.Response.HasStarted check
-```
+## HTTP Status Map (GlobalExceptionMiddleware)
+| Exception | Status |
+|---|---|
+| `FluentValidation.ValidationException` | 422 |
+| `BadHttpRequestException` | `ex.StatusCode` (400/413) |
+| `OperationCanceledException` + `RequestAborted` | swallowed (SSE disconnect) |
+| `NotFoundException` | 404 |
+| Anything else | 500 |
 
-## Service Interfaces
-```
-IRequestQueuePublisher  (Domain)              → RedisStreamPublisher (XADD webhook-requests)
-ITokenCache             (Application/Caching) → RedisTokenCache (IMemoryCache, 5-min sliding)
-ISseNotifier            (Domain)              → SseNotifier (ConcurrentDictionary<Guid, Channel<SseEvent>>)
-ISessionRevocationStore (API/Services)        → RedisSessionRevocationStore (in-memory for now)
-```
+## Test Projects (`tests/`)
+| Project | Tests | Tool |
+|---|---:|---|
+| `Hookbin.UnitTests` | 377 | xUnit + NSubstitute + FluentAssertions |
+| `Hookbin.IntegrationTests` | 85 | xUnit + WebAppFactory + Testcontainers (MSSQL + Redis) |
+| `Hookbin.ArchitectureTests` | 47 | ArchUnitNET + NetArchTest |
+| `Hookbin.E2ETests` | 64 | xUnit + Playwright + shared `DashboardE2EFixture` |
 
-## Token Command Cache Invalidation
-All four mutating token commands call `ITokenCache.Remove(tokenId)` after DB write:
-```
-DeleteTokenCommand → DeleteTokenCommandHandler → repo.DeleteAsync → cache.Remove
-UpdateTokenCommand → UpdateTokenCommandHandler → repo.UpdateAsync → cache.Remove
-SetCustomResponseCommand → ... → cache.Remove
-ResetCustomResponseCommand → ... → cache.Remove
-```
-
-## Key Files — API
-```
-src/Hookbin.API/Program.cs                               (DI: AddCoreInfrastructure + AddApiInfrastructure)
-src/Hookbin.API/Middleware/GlobalExceptionMiddleware.cs  (BadHttpRequestException, SSE guard)
-src/Hookbin.API/Controllers/AuthController.cs           (login/logout/me + ISessionRevocationStore)
-src/Hookbin.API/Controllers/WebhookController.cs        (receiver: ITokenCache, IRequestQueuePublisher)
-src/Hookbin.API/Controllers/SseController.cs            (SSE subscribe, 10-connection cap)
-src/Hookbin.API/Controllers/TokensController.cs         (CRUD + custom-response)
-src/Hookbin.API/Controllers/RequestsController.cs       (paging, export, delete)
-src/Hookbin.API/Services/ISessionRevocationStore.cs
-src/Hookbin.API/Services/RedisSessionRevocationStore.cs
-```
-
-## Key Files — Infrastructure
-```
-src/Hookbin.Infrastructure/DependencyInjection.cs       (AddCoreInfrastructure, AddApiInfrastructure, AddStreamWorkerInfrastructure, AddJobsWorkerInfrastructure)
-src/Hookbin.Infrastructure/Redis/RedisStreamPublisher.cs (XADD webhook-requests)
-src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs      (IMemoryCache wrapper, 5-min sliding)
-src/Hookbin.Infrastructure/Redis/RedisStreamConsumerService.cs (XREADGROUP, PEL recovery, XACK)
-src/Hookbin.Infrastructure/Redis/RedisSseBridgeService.cs (SUBSCRIBE sse:* → SseNotifier)
-src/Hookbin.Infrastructure/Sse/SseNotifier.cs            (Channel<SseEvent>, max 10/token)
-src/Hookbin.Infrastructure/BackgroundServices/RetentionCleanupService.cs (24h PeriodicTimer)
-src/Hookbin.Infrastructure/Persistence/ApplicationDbContext.cs
-src/Hookbin.Infrastructure/Persistence/Repositories/WebhookRequestRepository.cs (ThenByDescending Id for determinism)
-src/Hookbin.Application/Caching/ITokenCache.cs
-src/Hookbin.Domain/Services/IRequestQueuePublisher.cs
-src/Hookbin.Domain/Services/ISseNotifier.cs
-```
-
-## Key Files — Workers
-```
-src/Hookbin.StreamWorker/Program.cs   (AddCoreInfrastructure + AddStreamWorkerInfrastructure; Polly DB wait; /health/live + /health/ready)
-src/Hookbin.JobsWorker/Program.cs     (AddCoreInfrastructure + AddJobsWorkerInfrastructure; Polly DB wait; SQL-only health check)
-```
-
-## Options (validated at startup)
-```
-Webhook:BaseUrl          (required) — used by API only; workers don't need it
-Webhook:RetentionDays    — used by JobsWorker's RetentionCleanupService
-Webhook:MaxRequestSizeMb — Kestrel body size limit (API only)
-Auth:Username / PasswordHash / SessionHours — API only
-HOOKBIN_WORKER_ID        — StreamWorker consumer identity; stable across restarts
-```
-⚠ `WebhookOptionsValidator` lives in `Hookbin.API.Options` (not Application) — its source file path
-matches `src/Hookbin.API/Options/`. It implements `IValidateOptions<WebhookOptions>` from Application.
-
-## Architecture Tests
-`tests/Hookbin.ArchitectureTests/` — 26 rules enforced at build time:
-```
-Layers/LayerDependencyTests.cs          (8)  — layer isolation, no cycles
-Conventions/CqrsConventionTests.cs      (5)  — sealed record commands, internal sealed handlers, validators
-Conventions/RepositoryEntityConventionTests.cs (4) — repo interfaces in Domain, impls in Infrastructure
-Conventions/ControllerMiddlewareConventionTests.cs (3) — public sealed controllers, middleware shape
-Conventions/TestProjectConventionTests.cs (3) — FA version uniformity, sealed test classes
-Structure/FolderNamespaceTests.cs        (3) — folder path matches CLR namespace
-```
-Run: `dotnet test tests/Hookbin.ArchitectureTests/`  (no Docker, ~1s)
-
-## Request Note Command
-```
-PATCH /api/tokens/{tokenId}/requests/{id}/note  [FromBody] { note: string|null }
-  → SetRequestNoteCommand(TokenId, RequestId, Note?) : IRequest<bool>
-  → SetRequestNoteCommandValidator: Note max 2000 chars (null allowed = clear note)
-  → IWebhookRequestRepository.UpdateNoteAsync → ExecuteUpdateAsync
-  Returns 200 OK / 404 Not Found
-```
-Key files: `src/Hookbin.Application/Requests/Commands/SetRequestNote/`
-
-## Domain Entity Mutation Methods
-`WebhookToken` and `WebhookRequest` use `private set;` on mutable properties — callers use intent-named methods:
-```
-WebhookToken:
-  Activate()                          → IsActive = true
-  Deactivate()                        → IsActive = false
-  UpdateDescription(string)           → Description = value
-  SetCustomResponse(CustomResponse)   → CustomResponse = value
-  ClearCustomResponse()               → CustomResponse = null
-
-WebhookRequest:
-  RecordProcessingTime(long ms)       → ProcessingTimeMs = Math.Max(0, ms)
-```
-EF Core reads/writes `private set;` properties via reflection — no mapping changes required.
-
-## IDOR Protection
-`GetRequestById`, `ExportRequest`, `DeleteRequest`, `SetRequestNote` all include `WHERE TokenId = @tokenId`
-
-## WebhookUrl Computation
-`webhookUrl` is NOT stored in DB. Computed at read time via `WebhookTokenExtensions.ToDto(baseUrl)`.
-Both `GetTokenQueryHandler` and `GetTokensQueryHandler` use `IOptions<WebhookOptions>` for `BaseUrl`.
+Audit coverage / mutation scores: `docs/AUDIT/BASELINE.md`.

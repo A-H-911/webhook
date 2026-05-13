@@ -1,23 +1,75 @@
-<mat-toolbar color="primary" class="app-toolbar">
-  <a routerLink="/dashboard" class="brand-link">
-    <mat-icon>cable</mat-icon>
-    <span>Hookbin</span>
+<header class="app-bar" [class.hidden]="!auth.isAuthenticated()">
+  <a routerLink="/dashboard" class="brand">
+    <span class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none" width="14" height="14" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 2v6"/>
+        <path d="M15 2v6"/>
+        <path d="M6 8h12v3a6 6 0 0 1-12 0V8z"/>
+        <path d="M12 17v5"/>
+      </svg>
+    </span>
+    <span class="brand-name">Hookbin</span>
   </a>
-  <span class="toolbar-spacer"></span>
-  <button
-    mat-icon-button
-    (click)="theme.toggle()"
-    [attr.aria-label]="theme.isDark() ? 'Switch to light mode' : 'Switch to dark mode'"
-  >
-    <mat-icon>{{ theme.isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
+
+  @if (versionService.version()) {
+    <div class="topbar-meta">
+      <span>v{{ versionService.version() }}</span>
+    </div>
+  }
+
+  @if (breadcrumb.context()?.type === 'dashboard' && auth.isAuthenticated()) {
+    <div class="topbar-meta meta-endpoints">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M2 12h20"/>
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+      </svg>
+      {{ totalEndpoints() }} endpoints
+    </div>
+  }
+
+  @if (breadcrumb.context()?.type === 'token') {
+    <div class="topbar-meta meta-endpoints">
+      <span class="bc-dim">Endpoint</span>
+      <span class="bc-sep">·</span>
+      <span class="bc-name">{{ $any(breadcrumb.context()).name }}</span>
+    </div>
+  }
+
+  <div class="topbar-spacer"></div>
+
+  @if (auth.user()) {
+    <span class="topbar-username">{{ auth.user()!.username }}</span>
+  }
+
+  <button class="icon-btn" (click)="theme.toggle()"
+          [title]="theme.isDark() ? 'Switch to light mode' : 'Switch to dark mode'">
+    @if (theme.isDark()) {
+      <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+        <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/>
+        <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    } @else {
+      <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    }
   </button>
+
   @if (auth.isAuthenticated()) {
-    <button mat-icon-button matTooltip="Sign out" aria-label="Sign out" (click)="logout()">
-      <mat-icon>logout</mat-icon>
+    <button class="icon-btn" title="Sign out" (click)="logout()">
+      <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </button>
   }
-</mat-toolbar>
+</header>
 
-<main class="app-content">
+<main class="app-content" [class.no-header]="!auth.isAuthenticated()">
   <router-outlet />
 </main>

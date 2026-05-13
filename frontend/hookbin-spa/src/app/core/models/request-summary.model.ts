@@ -7,7 +7,8 @@ export interface RequestSummary {
   contentType?: string | null;
   sizeBytes?: number;
   ipAddress?: string;
-  statusCode?: number;
+  responseStatusCode?: number | null;
+  ipCountry?: string | null;
 }
 
 export interface PagedResult<T> {

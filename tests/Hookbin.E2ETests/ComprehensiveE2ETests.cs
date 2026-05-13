@@ -25,7 +25,7 @@ public sealed class WebhookReceiverE2ETests(DashboardE2EFixture fixture)
 
     private async Task<(string id, string webhookPath)> CreateAsync(string desc)
     {
-        var r = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        var r = await Api.PostAsJsonAsync("/api/tokens", new { name = desc });
         r.EnsureSuccessStatusCode();
         var j = await r.Content.ReadFromJsonAsync<JsonElement>();
         var id = j.GetProperty("id").GetString()!;
@@ -80,7 +80,7 @@ public sealed class WebhookReceiverE2ETests(DashboardE2EFixture fixture)
 
         // Deactivate the token
         var deactivateR = await Api.PutAsJsonAsync($"/api/tokens/{id}",
-            new { description = "recv-410", isActive = false });
+            new { name = "recv-410", isActive = false });
         deactivateR.EnsureSuccessStatusCode();
 
         // Send to the now-inactive token
@@ -213,7 +213,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
 
     private async Task<(string id, string webhookPath)> CreateAsync(string desc)
     {
-        var r = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        var r = await Api.PostAsJsonAsync("/api/tokens", new { name = desc });
         r.EnsureSuccessStatusCode();
         var j = await r.Content.ReadFromJsonAsync<JsonElement>();
         var id = j.GetProperty("id").GetString()!;
@@ -245,8 +245,8 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
         {
             await page.GotoAsync($"{BaseUrl}/tokens/{id}");
             await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
-            await page.WaitForSelectorAsync(".sse-dot.connected", new() { Timeout = 10_000 });
-            await Assertions.Expect(page.Locator(".sse-dot.connected")).ToBeVisibleAsync();
+            await page.WaitForSelectorAsync(".live-tag", new() { Timeout = 10_000 });
+            await Assertions.Expect(page.Locator(".live-tag")).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }
@@ -291,7 +291,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task RequestDetail_ShowsHeadersAndBodySection()
     {
-        var (id, path) = await CreateAsync("detail-body");
+        var (id, path) = await CreateAsync($"detail-body-{Guid.NewGuid():N}"[..28]);
         await Api.PostAsync(path,
             new StringContent("{\"key\":\"val\"}", Encoding.UTF8, "application/json"));
         await WaitForRequestsAsync(id);
@@ -302,9 +302,13 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
             await page.GotoAsync($"{BaseUrl}/tokens/{id}");
             await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
             await page.Locator(".request-row").First.ClickAsync();
-            await page.WaitForSelectorAsync(".code-block", new() { Timeout = 5_000 });
-            await page.WaitForSelectorAsync(".body-block", new() { Timeout = 5_000 });
-            var bodyText = await page.InnerTextAsync(".body-block");
+            // Headers section uses .hdr-code; body section uses .body-card
+            await page.WaitForSelectorAsync(".hdr-code", new() { Timeout = 5_000 });
+            await page.WaitForSelectorAsync(".body-card", new() { Timeout = 5_000 });
+            // Default tree view renders <app-json-tree>; switch to RAW for the .body-code element
+            await page.Locator(".body-tab", new() { HasText = "RAW" }).ClickAsync();
+            await page.WaitForSelectorAsync(".body-card .body-code", new() { Timeout = 5_000 });
+            var bodyText = await page.Locator(".body-card .body-code").First.InnerTextAsync();
             Assert.Contains("key", bodyText);
         }
         finally { await page.CloseAsync(); }
@@ -313,7 +317,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task DeleteSingleRequest_RemovesRowFromList()
     {
-        var (id, path) = await CreateAsync("del-req");
+        var (id, path) = await CreateAsync($"del-req-{Guid.NewGuid():N}"[..28]);
         await Api.PostAsync(path, new StringContent(""));
         await WaitForRequestsAsync(id);
 
@@ -323,15 +327,16 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
             await page.GotoAsync($"{BaseUrl}/tokens/{id}");
             await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
 
-            var deleteBtn = page.Locator(".request-row .row-action").First;
+            var deleteBtn = page.Locator(".row-del").First;
             await deleteBtn.ClickAsync(new LocatorClickOptions { Force = true });
 
-            var confirm = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            // Scope to the confirm modal — the toolbar also has .btn-danger ("Delete URL")
+            var confirm = page.Locator(".modal-panel .btn-danger");
             await confirm.WaitForAsync(new() { Timeout = 5_000 });
             await confirm.ClickAsync();
 
-            await page.WaitForSelectorAsync(".list-empty", new() { Timeout = 5_000 });
-            await Assertions.Expect(page.Locator(".list-empty")).ToBeVisibleAsync();
+            await page.WaitForSelectorAsync(".list-panel .list-empty", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".list-panel .list-empty")).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }
@@ -339,7 +344,7 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task ClearAll_EmptiesRequestList()
     {
-        var (id, path) = await CreateAsync("clear-all");
+        var (id, path) = await CreateAsync($"clear-all-{Guid.NewGuid():N}"[..28]);
         await Api.PostAsync(path, new StringContent(""));
         await Api.PostAsync(path, new StringContent(""));
         await WaitForRequestsAsync(id, expectedCount: 2);
@@ -350,15 +355,15 @@ public sealed class TokenDetailInteractionE2ETests(DashboardE2EFixture fixture)
             await page.GotoAsync($"{BaseUrl}/tokens/{id}");
             await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
 
-            var clearBtn = page.Locator("button[mat-stroked-button][color='warn']");
+            var clearBtn = page.GetByRole(AriaRole.Button, new() { Name = "Clear", Exact = true });
             await clearBtn.ClickAsync(new LocatorClickOptions { Force = true });
 
-            var confirm = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            var confirm = page.Locator(".modal-panel .btn-danger");
             await confirm.WaitForAsync(new() { Timeout = 5_000 });
             await confirm.ClickAsync();
 
-            await page.WaitForSelectorAsync(".list-empty", new() { Timeout = 5_000 });
-            await Assertions.Expect(page.Locator(".list-empty")).ToBeVisibleAsync();
+            await page.WaitForSelectorAsync(".list-panel .list-empty", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".list-panel .list-empty")).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }
@@ -387,22 +392,22 @@ public sealed class DashboardInteractionE2ETests(DashboardE2EFixture fixture)
         {
             await page.GotoAsync($"{BaseUrl}/dashboard");
             await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
-            await page.WaitForSelectorAsync("mat-dialog-container");
+            await page.WaitForSelectorAsync(".modal-panel");
 
             // Type the sentinel description, then click Cancel
-            await page.GetByPlaceholder("e.g. GitHub events").FillAsync(sentinel);
+            await page.GetByPlaceholder("e.g. github-events").FillAsync(sentinel);
             await page.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
-            await page.WaitForSelectorAsync("mat-dialog-container",
+            await page.WaitForSelectorAsync(".modal-panel",
                 new() { State = WaitForSelectorState.Hidden, Timeout = 3_000 });
         }
         finally { await page.CloseAsync(); }
 
-        // No token with the sentinel description should have been created
+        // No token with the sentinel name should have been created
         var tokensJ = await (await Api.GetAsync("/api/tokens"))
             .Content.ReadFromJsonAsync<JsonElement>();
-        var exists = tokensJ.EnumerateArray()
-            .Any(t => t.TryGetProperty("description", out var d) &&
-                      d.GetString() == sentinel);
+        var exists = tokensJ.GetProperty("items").EnumerateArray()
+            .Any(t => t.TryGetProperty("name", out var n) &&
+                      n.GetString() == sentinel);
         Assert.False(exists, "Cancel must not create a token");
     }
 
@@ -415,15 +420,18 @@ public sealed class DashboardInteractionE2ETests(DashboardE2EFixture fixture)
         {
             await page.GotoAsync($"{BaseUrl}/dashboard");
             await page.GetByRole(AriaRole.Button, new() { Name = "New URL" }).ClickAsync();
-            await page.WaitForSelectorAsync("mat-dialog-container");
-            await page.GetByPlaceholder("e.g. GitHub events").FillAsync(desc);
-            await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
-            await page.WaitForSelectorAsync("mat-dialog-container",
-                new() { State = WaitForSelectorState.Hidden, Timeout = 3_000 });
+            await page.WaitForSelectorAsync(".modal-panel");
+            await page.GetByPlaceholder("e.g. github-events").FillAsync(desc);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Create endpoint", Exact = true }).ClickAsync();
+            // After Create the SPA navigates to /tokens/{id} — wait for the URL change so the
+            // request completes, then return to the dashboard to verify the card.
+            await Assertions.Expect(page).ToHaveURLAsync(new Regex("/tokens/[0-9a-f-]+"),
+                new() { Timeout = 10_000 });
+            await page.GotoAsync($"{BaseUrl}/dashboard");
 
-            var descLocator = page.Locator(".token-description", new() { HasText = desc });
-            await descLocator.WaitForAsync(new() { Timeout = 10_000 });
-            await Assertions.Expect(descLocator).ToBeVisibleAsync();
+            var descLocator = page.Locator(".card-name", new() { HasText = desc });
+            await descLocator.First.WaitForAsync(new() { Timeout = 10_000 });
+            await Assertions.Expect(descLocator.First).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }
@@ -432,20 +440,20 @@ public sealed class DashboardInteractionE2ETests(DashboardE2EFixture fixture)
     public async Task DeleteFromCard_RemovesCard()
     {
         var desc = $"del-card-{Guid.NewGuid():N}";
-        var createR = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        var createR = await Api.PostAsJsonAsync("/api/tokens", new { name = desc });
         createR.EnsureSuccessStatusCode();
 
         var page = await NewPageAsync();
         try
         {
             await page.GotoAsync($"{BaseUrl}/dashboard");
-            var card = page.Locator("mat-card.token-card",
-                new() { Has = page.Locator(".token-description", new() { HasText = desc }) });
+            var card = page.Locator(".card",
+                new() { Has = page.Locator(".card-name", new() { HasText = desc }) });
             await card.WaitForAsync(new() { Timeout = 10_000 });
 
-            await card.Locator("button[color='warn']").ClickAsync(new LocatorClickOptions { Force = true });
+            await card.Locator("button.icon-btn.danger").ClickAsync(new LocatorClickOptions { Force = true });
 
-            var confirm = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            var confirm = page.Locator(".modal-panel .btn-danger");
             await confirm.WaitForAsync(new() { Timeout = 5_000 });
             await confirm.ClickAsync();
 
@@ -501,7 +509,7 @@ public sealed class HealthAndSseE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task SseEndpoint_ReturnsEventStreamContentType()
     {
-        var createR = await Api.PostAsJsonAsync("/api/tokens", new { description = "sse-infra" });
+        var createR = await Api.PostAsJsonAsync("/api/tokens", new { name = "sse-infra" });
         createR.EnsureSuccessStatusCode();
         var j = await createR.Content.ReadFromJsonAsync<JsonElement>();
         var id = j.GetProperty("id").GetString()!;
@@ -541,7 +549,7 @@ public sealed class CustomResponseFlowE2ETests(DashboardE2EFixture fixture)
 
     private async Task<(string id, string webhookPath)> CreateAsync(string desc)
     {
-        var r = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        var r = await Api.PostAsJsonAsync("/api/tokens", new { name = desc });
         r.EnsureSuccessStatusCode();
         var j = await r.Content.ReadFromJsonAsync<JsonElement>();
         var id = j.GetProperty("id").GetString()!;
@@ -552,22 +560,31 @@ public sealed class CustomResponseFlowE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task CustomResponseBadge_AppearsOnDetailPageAfterSetting()
     {
-        var (id, _) = await CreateAsync("custom-badge");
+        // The current UI exposes the custom-response chip on the dashboard card.
+        // Verify the chip appears once a custom response is set.
+        var name = $"custom-badge-{Guid.NewGuid():N}"[..28];
+        var (id, _) = await CreateAsync(name);
         await Api.PutAsJsonAsync($"/api/tokens/{id}/custom-response", new
         {
             statusCode = 201, contentType = "application/json", body = "{}", headers = "{}"
         });
 
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{id}");
-        await page.WaitForSelectorAsync(".custom-badge", new() { Timeout = 10_000 });
-        await Assertions.Expect(page.Locator(".custom-badge")).ToBeVisibleAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            var card = page.Locator(".card", new() { Has = page.Locator(".card-name", new() { HasText = name }) });
+            await card.First.WaitForAsync(new() { Timeout = 10_000 });
+            await Assertions.Expect(card.First.Locator(".chip")).ToBeVisibleAsync();
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
     public async Task CustomResponseBadge_DisappearsAfterReset()
     {
-        var (id, _) = await CreateAsync("custom-badge-reset");
+        var name = $"custom-badge-reset-{Guid.NewGuid():N}"[..28];
+        var (id, _) = await CreateAsync(name);
         await Api.PutAsJsonAsync($"/api/tokens/{id}/custom-response", new
         {
             statusCode = 201, contentType = "application/json", body = "{}", headers = "{}"
@@ -575,34 +592,48 @@ public sealed class CustomResponseFlowE2ETests(DashboardE2EFixture fixture)
         await Api.DeleteAsync($"/api/tokens/{id}/custom-response");
 
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{id}");
-        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
-
-        var badge = page.Locator(".custom-badge");
-        await Assertions.Expect(badge).ToBeHiddenAsync();
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            var card = page.Locator(".card", new() { Has = page.Locator(".card-name", new() { HasText = name }) });
+            await card.First.WaitForAsync(new() { Timeout = 10_000 });
+            await Assertions.Expect(card.First.Locator(".chip")).ToBeHiddenAsync();
+        }
+        finally { await page.CloseAsync(); }
     }
 
     [Fact]
     public async Task SetCustomResponse_ViaDialog_UpdatesBadge()
     {
-        var (id, _) = await CreateAsync("custom-dialog");
+        var name = $"custom-dialog-{Guid.NewGuid():N}"[..28];
+        var (id, _) = await CreateAsync(name);
         var page = await NewPageAsync();
-        await page.GotoAsync($"{BaseUrl}/tokens/{id}");
-        await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
+        try
+        {
+            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
+            await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
 
-        // Open custom response dialog via "Response" button
-        var responseBtn = page.GetByRole(AriaRole.Button,
-            new() { NameRegex = new Regex("Response", RegexOptions.IgnoreCase) });
-        await responseBtn.ClickAsync(new LocatorClickOptions { Force = true });
-        await page.WaitForSelectorAsync("mat-dialog-container", new() { Timeout = 5_000 });
+            // Open custom response dialog via "Response" button
+            var responseBtn = page.GetByRole(AriaRole.Button,
+                new() { NameRegex = new Regex("Response", RegexOptions.IgnoreCase) });
+            await responseBtn.ClickAsync(new LocatorClickOptions { Force = true });
+            await page.WaitForSelectorAsync(".modal-panel", new() { Timeout = 5_000 });
 
-        // Save with defaults (status 200, application/json, no body)
-        var saveBtn = page.Locator("mat-dialog-actions button[color='primary']");
-        await saveBtn.ClickAsync();
+            // Save with defaults (status 200, application/json, no body) — scope to the modal
+            await page.Locator(".modal-panel .btn-primary").ClickAsync();
+            await page.WaitForSelectorAsync(".modal-panel",
+                new() { State = WaitForSelectorState.Hidden, Timeout = 5_000 });
+            // Toast appears only after the HTTP setCustomResponse call completes — gate the
+            // navigation on it so the dashboard fetch sees the updated state.
+            await page.WaitForSelectorAsync(".toast", new() { Timeout = 5_000 });
 
-        // Badge must now be visible
-        await page.WaitForSelectorAsync(".custom-badge", new() { Timeout = 5_000 });
-        await Assertions.Expect(page.Locator(".custom-badge")).ToBeVisibleAsync();
+            // Verify on dashboard — the chip is the user-visible custom-response indicator
+            await page.GotoAsync($"{BaseUrl}/dashboard");
+            var card = page.Locator(".card", new() { Has = page.Locator(".card-name", new() { HasText = name }) });
+            await card.First.WaitForAsync(new() { Timeout = 10_000 });
+            await Assertions.Expect(card.First.Locator(".chip")).ToBeVisibleAsync();
+        }
+        finally { await page.CloseAsync(); }
     }
 }
 
@@ -620,7 +651,7 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
 
     private async Task<(string id, string webhookPath)> CreateAsync(string desc)
     {
-        var r = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        var r = await Api.PostAsJsonAsync("/api/tokens", new { name = desc });
         r.EnsureSuccessStatusCode();
         var j = await r.Content.ReadFromJsonAsync<JsonElement>();
         var id = j.GetProperty("id").GetString()!;
@@ -679,14 +710,17 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
     }
 
     [Fact]
-    public async Task ProcessingTimeMs_IsDisplayedAfterStreamWorker()
+    public async Task ProcessingTimeMs_IsPopulatedByStreamWorker()
     {
-        var (id, path) = await CreateAsync("proc-time-e2e");
+        // The detail-page UI does not render processingTimeMs directly; verify the
+        // stream worker populates the field on the request DTO. This is what the
+        // dashboard "sparkline" and request listing depend on.
+        var (id, path) = await CreateAsync($"proc-time-{Guid.NewGuid():N}"[..28]);
         await Api.PostAsync(path, new StringContent("{}", Encoding.UTF8, "application/json"));
 
-        // Poll until stream worker sets processingTimeMs (up to 10 s)
-        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var deadline = DateTime.UtcNow.AddSeconds(15);
         string? reqId = null;
+        long? processingTime = null;
         while (DateTime.UtcNow < deadline)
         {
             var listJ = await WaitForRequestsAsync(id, timeoutMs: 2_000);
@@ -696,36 +730,41 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
                 var detailJ = await (await Api.GetAsync($"/api/tokens/{id}/requests/{reqId}"))
                     .Content.ReadFromJsonAsync<JsonElement>();
                 if (detailJ.TryGetProperty("processingTimeMs", out var ptProp) &&
-                    ptProp.ValueKind != JsonValueKind.Null)
+                    ptProp.ValueKind == JsonValueKind.Number)
+                {
+                    processingTime = ptProp.GetInt64();
                     break;
+                }
             }
             await Task.Delay(500);
         }
         Assert.NotNull(reqId);
-
-        var page = await NewPageAsync();
-        try
-        {
-            await page.GotoAsync($"{BaseUrl}/tokens/{id}");
-            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
-            await page.Locator(".request-row").First.ClickAsync();
-            await page.WaitForSelectorAsync(".detail-content", new() { Timeout = 5_000 });
-
-            // Pipeline row only renders when processingTimeMs is non-null
-            await page.WaitForSelectorAsync(".detail-grid span:has-text(' ms')",
-                new() { Timeout = 5_000 });
-            var ptText = await page.Locator(".detail-grid span:has-text(' ms')").InnerTextAsync();
-            Assert.Matches(@"\d+ ms", ptText);
-        }
-        finally { await page.CloseAsync(); }
+        Assert.NotNull(processingTime);
+        Assert.True(processingTime >= 0, $"processingTimeMs must be non-negative, got {processingTime}");
     }
 
     [Fact]
     public async Task Notes_AddEditClearLifecycle()
     {
-        var (id, path) = await CreateAsync("notes-e2e");
+        var (id, path) = await CreateAsync($"notes-{Guid.NewGuid():N}"[..28]);
         await Api.PostAsync(path, new StringContent(""));
-        await WaitForRequestsAsync(id);
+        var listJ = await WaitForRequestsAsync(id);
+        var reqId = listJ.GetProperty("items")[0].GetProperty("id").GetString()!;
+
+        async Task WaitForNoteAsync(string? expected)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < deadline)
+            {
+                var detailJ = await (await Api.GetAsync($"/api/tokens/{id}/requests/{reqId}"))
+                    .Content.ReadFromJsonAsync<JsonElement>();
+                detailJ.TryGetProperty("note", out var noteProp);
+                var actual = noteProp.ValueKind == JsonValueKind.String ? noteProp.GetString() : null;
+                if (actual == expected) return;
+                await Task.Delay(200);
+            }
+            Assert.Fail($"Note never reached expected value: {expected ?? "<null>"}");
+        }
 
         var page = await NewPageAsync();
         try
@@ -735,33 +774,35 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
             await page.Locator(".request-row").First.ClickAsync();
             await page.WaitForSelectorAsync(".detail-content", new() { Timeout = 5_000 });
 
-            // Initially shows placeholder
-            await page.WaitForSelectorAsync(".note-view", new() { Timeout = 5_000 });
-            var notePlaceholder = await page.Locator(".note-placeholder").InnerTextAsync();
-            Assert.Contains("note", notePlaceholder.ToLowerInvariant());
+            // New UI: single always-visible textarea inside .note-card that saves on blur
+            await page.WaitForSelectorAsync(".note-card .note-textarea", new() { Timeout = 5_000 });
+            var textarea = page.Locator(".note-card .note-textarea");
+            await Assertions.Expect(textarea).ToBeVisibleAsync();
+            await Assertions.Expect(textarea).ToHaveValueAsync("");
 
-            // Enter edit mode
-            await page.Locator(".note-view").ClickAsync();
-            await page.WaitForSelectorAsync(".note-textarea", new() { Timeout = 3_000 });
-
-            // Type and save
+            // Type, then trigger blur via Tab (FillAsync alone won't fire blur)
             const string noteText = "E2E test note — lifecycle";
-            await page.FillAsync(".note-textarea", noteText);
-            await page.Locator("button:has-text('Save')").ClickAsync();
+            await textarea.FillAsync(noteText);
+            await textarea.PressAsync("Tab");
+            await WaitForNoteAsync(noteText);
 
-            // Saved text must appear in view mode
-            await page.WaitForSelectorAsync(".note-text", new() { Timeout = 5_000 });
-            var savedText = await page.Locator(".note-text").InnerTextAsync();
-            Assert.Equal(noteText, savedText.Trim());
+            // Reload — the note must persist round-trip via the API
+            await page.ReloadAsync();
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            await page.Locator(".request-row").First.ClickAsync();
+            await page.WaitForSelectorAsync(".note-card .note-textarea", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".note-card .note-textarea")).ToHaveValueAsync(noteText);
 
-            // Edit again — clear the note
-            await page.Locator(".note-view").ClickAsync();
-            await page.WaitForSelectorAsync(".note-textarea", new() { Timeout = 3_000 });
-            await page.FillAsync(".note-textarea", "");
-            await page.Locator("button:has-text('Save')").ClickAsync();
+            // Clear and blur — note must be removed
+            await page.Locator(".note-card .note-textarea").FillAsync("");
+            await page.Locator(".note-card .note-textarea").PressAsync("Tab");
+            await WaitForNoteAsync(null);
 
-            // Placeholder must reappear
-            await page.WaitForSelectorAsync(".note-placeholder", new() { Timeout = 5_000 });
+            await page.ReloadAsync();
+            await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
+            await page.Locator(".request-row").First.ClickAsync();
+            await page.WaitForSelectorAsync(".note-card .note-textarea", new() { Timeout = 5_000 });
+            await Assertions.Expect(page.Locator(".note-card .note-textarea")).ToHaveValueAsync("");
         }
         finally { await page.CloseAsync(); }
     }
@@ -769,7 +810,7 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task CustomResponse_DialogSavesAndApplies()
     {
-        var (id, path) = await CreateAsync("cr-dialog-e2e");
+        var (id, path) = await CreateAsync($"cr-dialog-{Guid.NewGuid():N}"[..28]);
 
         var page = await NewPageAsync();
         try
@@ -781,22 +822,18 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
             var responseBtn = page.GetByRole(AriaRole.Button,
                 new() { NameRegex = new Regex("Response", RegexOptions.IgnoreCase) });
             await responseBtn.ClickAsync(new LocatorClickOptions { Force = true });
-            await page.WaitForSelectorAsync("mat-dialog-container", new() { Timeout = 5_000 });
+            await page.WaitForSelectorAsync(".modal-panel", new() { Timeout = 5_000 });
 
-            // Change status code to 201
-            await page.Locator("mat-select").First.ClickAsync();
-            // Wait for the CDK overlay panel to open before clicking an option
-            await page.WaitForSelectorAsync("mat-option", new() { Timeout = 3_000 });
-            await page.Locator("mat-option").Filter(new() { HasTextString = "201" }).ClickAsync();
+            // The dialog now uses a native <select> ("STATUS" field) — set value to 201
+            await page.Locator(".modal-panel .field-select").First.SelectOptionAsync("201");
 
-            // Save
-            await page.Locator("mat-dialog-actions button[color='primary']").ClickAsync();
-            await page.WaitForSelectorAsync("mat-dialog-container",
-                new() { State = WaitForSelectorState.Hidden, Timeout = 3_000 });
+            // Save — scope to the dialog so we don't grab another .btn-primary on the page
+            await page.Locator(".modal-panel .btn-primary").ClickAsync();
+            await page.WaitForSelectorAsync(".modal-panel",
+                new() { State = WaitForSelectorState.Hidden, Timeout = 5_000 });
 
-            // Wait for the snackbar — it only fires after the HTTP setCustomResponse call completes.
-            // Without this, the test fires the webhook before the backend has the custom response saved.
-            await page.WaitForSelectorAsync("mat-snack-bar-container", new() { Timeout = 5_000 });
+            // The custom toast appears after the save HTTP call completes
+            await page.WaitForSelectorAsync(".toast", new() { Timeout = 5_000 });
         }
         finally { await page.CloseAsync(); }
 
@@ -815,7 +852,7 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
         {
             await page.GotoAsync($"{BaseUrl}/tokens/{id}");
             await page.WaitForSelectorAsync("code.webhook-url", new() { Timeout = 10_000 });
-            await page.WaitForSelectorAsync(".sse-dot.connected", new() { Timeout = 10_000 });
+            await page.WaitForSelectorAsync(".live-tag", new() { Timeout = 10_000 });
 
             // List must be empty before the request
             await Assertions.Expect(page.Locator(".list-panel .list-empty")).ToBeVisibleAsync();
@@ -880,7 +917,7 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
     [Fact]
     public async Task DeleteSingleThenClearAll_LeavesEmptyState()
     {
-        var (id, path) = await CreateAsync("del-clear-e2e");
+        var (id, path) = await CreateAsync($"del-clear-{Guid.NewGuid():N}"[..28]);
 
         await Api.PostAsync(path, new StringContent("first"));
         await Api.PostAsync(path, new StringContent("second"));
@@ -893,9 +930,9 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
             await page.WaitForSelectorAsync(".request-row", new() { Timeout = 10_000 });
 
             // Delete the first row
-            await page.Locator(".request-row .row-action").First
+            await page.Locator(".row-del").First
                 .ClickAsync(new LocatorClickOptions { Force = true });
-            var confirmDel = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            var confirmDel = page.Locator(".modal-panel .btn-danger");
             await confirmDel.WaitForAsync(new() { Timeout = 5_000 });
             await confirmDel.ClickAsync();
 
@@ -904,9 +941,9 @@ public sealed class NewFeatureE2ETests(DashboardE2EFixture fixture)
                 .ToHaveCountAsync(1, new() { Timeout = 5_000 });
 
             // Clear all remaining
-            await page.Locator("button[mat-stroked-button][color='warn']")
+            await page.GetByRole(AriaRole.Button, new() { Name = "Clear", Exact = true })
                 .ClickAsync(new LocatorClickOptions { Force = true });
-            var confirmClear = page.Locator("mat-dialog-actions button.mat-warn, mat-dialog-actions [color='warn']");
+            var confirmClear = page.Locator(".modal-panel .btn-danger");
             await confirmClear.WaitForAsync(new() { Timeout = 5_000 });
             await confirmClear.ClickAsync();
 

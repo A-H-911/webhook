@@ -15,7 +15,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task CreateToken_Returns201_WithWebhookUrl()
     {
-        var response = await _client.PostAsJsonAsync("/api/tokens", new { description = "test token" });
+        var response = await _client.PostAsJsonAsync("/api/tokens", new { name = "test token" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
@@ -25,14 +25,13 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task GetTokens_ReturnsCreatedToken()
     {
-        await _client.PostAsJsonAsync("/api/tokens", new { description = "list-test" });
+        await _client.PostAsJsonAsync("/api/tokens", new { name = "list-test" });
 
         var response = await _client.GetAsync("/api/tokens");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var items = await response.Content.ReadFromJsonAsync<JsonElement[]>(JsonOpts);
-        items.Should().NotBeNull();
-        items!.Should().NotBeEmpty();
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        page.GetProperty("items").GetArrayLength().Should().BeGreaterThan(0);
     }
 
     [Fact]
@@ -45,7 +44,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task GetTokenById_Returns200_ForCreatedToken()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "get-by-id" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "get-by-id" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 
@@ -57,7 +56,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task DeleteToken_Returns204_ThenGetReturns404()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "to-delete" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "to-delete" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 
@@ -71,7 +70,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task SetCustomResponse_Returns204_AndTokenReflectsChange()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "custom-resp" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "custom-resp" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 
@@ -92,12 +91,12 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task UpdateToken_Returns200_AndPersistsChange()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "update-test" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "update-test" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 
         var updateResponse = await _client.PutAsJsonAsync($"/api/tokens/{id}",
-            new { description = "updated-description", isActive = true });
+            new { name = "update-test", description = "updated-description", isActive = true });
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var getResponse = await _client.GetAsync($"/api/tokens/{id}");
@@ -108,7 +107,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task ResetCustomResponse_Returns204_AndClearsIt()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "reset-cr" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "reset-cr" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 
@@ -126,7 +125,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task SetCustomResponse_WithInvalidStatusCode_Returns422()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "val-test" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "val-test" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 
@@ -147,7 +146,7 @@ public sealed class TokensApiTests(WebAppFactory factory) : IClassFixture<WebApp
     [Fact]
     public async Task SetCustomResponse_WithInvalidHeadersJson_Returns422()
     {
-        var created = await _client.PostAsJsonAsync("/api/tokens", new { description = "val-headers" });
+        var created = await _client.PostAsJsonAsync("/api/tokens", new { name = "val-headers" });
         var token = await created.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
         var id = token.GetProperty("id").GetString();
 

@@ -6,7 +6,7 @@ describe('ThemeService', () => {
   let setItem: ReturnType<typeof vi.fn>;
 
   function setup(storedValue: string | null = null): ThemeService {
-    document.documentElement.classList.remove('dark-theme');
+    document.documentElement.removeAttribute('data-theme');
     getItem = vi.fn().mockReturnValue(storedValue);
     setItem = vi.fn();
     vi.stubGlobal('localStorage', { getItem, setItem });
@@ -15,7 +15,7 @@ describe('ThemeService', () => {
   }
 
   afterEach(() => {
-    document.documentElement.classList.remove('dark-theme');
+    document.documentElement.removeAttribute('data-theme');
     vi.unstubAllGlobals();
   });
 
@@ -24,9 +24,9 @@ describe('ThemeService', () => {
     expect(service.isDark()).toBe(true);
   });
 
-  it('applies dark-theme class to <html> on init when default', () => {
+  it('applies dark data-theme attribute to <html> on init when default', () => {
     setup(null);
-    expect(document.documentElement.classList.contains('dark-theme')).toBe(true);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 
   it('respects stored light preference', () => {
@@ -34,9 +34,9 @@ describe('ThemeService', () => {
     expect(service.isDark()).toBe(false);
   });
 
-  it('does not apply dark-theme class when stored preference is light', () => {
+  it('applies light data-theme attribute when stored preference is light', () => {
     setup('light');
-    expect(document.documentElement.classList.contains('dark-theme')).toBe(false);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
   it('toggle switches from dark to light', () => {
@@ -45,10 +45,10 @@ describe('ThemeService', () => {
     expect(service.isDark()).toBe(false);
   });
 
-  it('toggle removes dark-theme class from <html>', () => {
+  it('toggle sets light data-theme attribute after toggling from dark', () => {
     const service = setup(null);
     service.toggle();
-    expect(document.documentElement.classList.contains('dark-theme')).toBe(false);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
   it('toggle writes updated preference to localStorage', () => {
@@ -57,15 +57,14 @@ describe('ThemeService', () => {
     expect(setItem).toHaveBeenCalledWith('color-scheme', 'light');
   });
 
-  it('toggle from light back to dark restores dark-theme class', () => {
+  it('toggle from light back to dark restores dark data-theme attribute', () => {
     const service = setup('light');
     service.toggle();
     expect(service.isDark()).toBe(true);
-    expect(document.documentElement.classList.contains('dark-theme')).toBe(true);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 
   it('falls back to dark when localStorage.getItem throws', () => {
-    document.documentElement.classList.remove('dark-theme');
     vi.stubGlobal('localStorage', {
       getItem: vi.fn().mockImplementation(() => {
         throw new Error('quota exceeded');
@@ -75,6 +74,6 @@ describe('ThemeService', () => {
     TestBed.configureTestingModule({});
     const service = TestBed.inject(ThemeService);
     expect(service.isDark()).toBe(true);
-    expect(document.documentElement.classList.contains('dark-theme')).toBe(true);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 });

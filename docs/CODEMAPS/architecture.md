@@ -1,70 +1,72 @@
-<!-- Generated: 2026-05-11 | Verified: 443 backend tests (310 unit + 26 arch + 59 integration + 48 E2E) + 118 frontend tests; three-process architecture (api + stream-worker + jobs-worker); Redis pub/sub SSE fan-out; DI split; IRequestQueuePublisher/ITokenCache/ISessionRevocationStore interfaces; ArchUnitNET 0.13.3 architecture test suite added -->
+<!-- Generated: 2026-05-13 | Files scanned: 170 (59 backend src + 50 tests + 61 frontend) | Token estimate: ~900 -->
 
 # Architecture
 
 ## Project Type
-Full-stack monorepo — .NET 10 Clean Architecture + Angular 21 SPA + SQL Server + Redis + SEQ + optional ngrok tunnel
+Full-stack monorepo — .NET 10 Clean Architecture + Angular 21 SPA + SQL Server 2022 + Redis 7 + SEQ.
 
-**Three deployable units** share the same Domain/Application/Infrastructure libraries, SQL DB, and Redis:
+**Three deployable units** share Domain/Application/Infrastructure libraries, SQL DB, and Redis:
 
 | Unit | Role |
 |------|------|
-| `Hookbin.API` | HTTP endpoints, SSE fan-out (cookie auth, rate limiting, antiforgery) |
-| `Hookbin.StreamWorker` | Drains `webhook-requests` Redis stream → persists to SQL → publishes `sse:{tokenId}` |
-| `Hookbin.JobsWorker` | Retention cleanup (24h PeriodicTimer); single replica only |
+| `Hookbin.API` | HTTP endpoints, SSE fan-out, cookie auth, antiforgery, rate limiting |
+| `Hookbin.StreamWorker` | XREADGROUP `webhook-requests` → persist → PUBLISH `sse:{tokenId}` |
+| `Hookbin.JobsWorker` | Retention cleanup (24h PeriodicTimer) — single replica only |
 
 ## System Diagram
 ```
-Browser (Angular 21)
-  │  HTTP (cookies, XSRF)        EventSource (SSE, withCredentials)
-  ▼                                           ▼
+Browser (Angular 21, standalone components)
+  │  HTTP (cookies, X-XSRF-TOKEN)        EventSource (SSE, withCredentials)
+  ▼                                                  ▼
 Nginx :8088
   │  /api/* /webhook/* /health → api:8080
   │  / → static Angular bundle
   ▼
 Hookbin.API :8080
-  │  ForwardedHeaders → GlobalExceptionMiddleware → RateLimiter → Auth → Antiforgery
+  │  ForwardedHeaders → GlobalExceptionMiddleware → RateLimiter → Auth(cookie) → Antiforgery
   │
-  ├── POST /webhook/{guid} → IRequestQueuePublisher → XADD webhook-requests stream
-  │
-  ├── GET  /api/tokens/{id}/sse → SseNotifier (in-process Channel<SseEvent>)
-  │        ↑ written by RedisSseBridgeService (SUBSCRIBE sse:* pub/sub channel)
-  │
-  └── CRUD /api/tokens, /api/tokens/{id}/requests (MediatR CQRS)
-
+  ├── POST /webhook/{guid}        → IRequestQueuePublisher → XADD webhook-requests
+  ├── GET  /api/tokens/{id}/sse   → SseNotifier Channel<SseEvent>
+  │        ↑ written by RedisSseBridgeService (SUBSCRIBE sse:*)
+  └── CRUD /api/tokens, /api/tokens/{id}/requests (MediatR CQRS, FluentValidation)
+                                                     │
+                                                     ▼
 Redis
-  ├── Stream:  webhook-requests (XREADGROUP → StreamWorker)
-  └── Pub/sub: sse:{tokenId}   (PUBLISH → API's RedisSseBridgeService → SseNotifier)
+  ├── Stream  webhook-requests (XREADGROUP → StreamWorker → XACK)
+  ├── Pub/sub sse:{tokenId}     (PUBLISH → API RedisSseBridgeService → SseNotifier)
+  ├── Cache   token:{guid}      (5 min sliding, JSON via System.Text.Json)
+  └── Set     session:revoked   (logout = instant cluster-wide invalidation)
 
 Hookbin.StreamWorker
-  ├── RedisStreamConsumerService: XREADGROUP → persist to SQL → PUBLISH sse:{tokenId}
-  └── Consumer name: HOOKBIN_WORKER_ID env var, fallback: "consumer-{MachineName}"
+  └── RedisStreamConsumerService: XREADGROUP "0-0" (PEL recovery) → ">" (new) → persist → XACK → PUBLISH sse:{tokenId}
+       Consumer name: HOOKBIN_WORKER_ID (default "consumer-{MachineName}")
 
 Hookbin.JobsWorker
-  └── RetentionCleanupService: PeriodicTimer (24h) → DELETE old WebhookRequests (batched 5k/loop)
+  └── RetentionCleanupService: 24h PeriodicTimer → DELETE old WebhookRequests (5k batched)
 
-SQL Server: WebhookTokens, WebhookRequests (shared by all three units)
-SEQ: structured log sink (shared by all three units)
+SQL Server: WebhookTokens, WebhookRequests
+SEQ:        structured log sink (all three units, OTel-friendly schema)
 ```
 
 ## Dependency Rule (Clean Architecture)
 ```
-API → Application → Domain
+API           → Application → Domain
 Infrastructure → Application → Domain
-StreamWorker → Infrastructure → Application → Domain
-JobsWorker   → Infrastructure → Application → Domain
-(Domain has zero references to outer layers)
+StreamWorker  → Infrastructure → Application → Domain
+JobsWorker    → Infrastructure → Application → Domain
+(Domain has zero references to outer layers — enforced by tests)
 ```
 
-**Enforced at build time** by `tests/Hookbin.ArchitectureTests/` (26 rules, ArchUnitNET 0.13.3):
-- Layer dependency rules (8 tests) — `LayerDependencyTests.cs`
-- CQRS conventions: sealed records, internal sealed handlers, AbstractValidator validators (5 tests) — `CqrsConventionTests.cs`
-- Repository/entity placement and immutability (4 tests) — `RepositoryEntityConventionTests.cs`
-- Controller/middleware conventions (3 tests) — `ControllerMiddlewareConventionTests.cs`
-- Test project conventions + FluentAssertions version uniformity (3 tests) — `TestProjectConventionTests.cs`
-- Folder-to-namespace alignment (3 tests, NetArchTest.eNhancedEdition 1.4.5) — `FolderNamespaceTests.cs`
-
-CI job: `architecture-test` (no `needs:` — runs in parallel, <60s)
+**Enforced by `tests/Hookbin.ArchitectureTests/` (47 tests, ArchUnitNET 0.13.3 + NetArchTest.eNhancedEdition 1.4.5):**
+- `Layers/LayerDependencyTests.cs` (8) — dependency direction
+- `Conventions/CqrsConventionTests.cs` (5) — sealed records, internal sealed handlers
+- `Conventions/RepositoryEntityConventionTests.cs` (4) — repository placement, entity immutability
+- `Conventions/ControllerMiddlewareConventionTests.cs` (3) — controller suffix, middleware namespace
+- `Conventions/TestProjectConventionTests.cs` (3) — FluentAssertions version uniformity
+- `Conventions/ZeroTrustInvariantsTests.cs` (12) — DANGER ZONE structural guards (private-set `[JsonInclude]`, `AsNoTracking`, `[AllowAnonymous]`, worker `MigrateAsync`)
+- `Conventions/OperationalSnapshotTests.cs` (4) — docker-compose replicas, nginx SSE buffering, worker `.csproj` design-tools exclusion
+- `Structure/FolderNamespaceTests.cs` (3) — folder ↔ namespace alignment
+- `Domain/EntityEncapsulationTests.cs` (5) — no public setters on entities
 
 ## DI Extension Map
 | Extension | Registers | Called by |
@@ -78,64 +80,57 @@ CI job: `architecture-test` (no `needs:` — runs in parallel, <60s)
 ```
 POST /api/auth/login (AllowAnonymous, rate-limited 5/min)
   → BCrypt verify → SignInAsync (cookie) → ISessionRevocationStore.IssueAsync
-GET  /api/auth/me   → returns username
+GET  /api/auth/me   → username + version
 POST /api/auth/logout → ISessionRevocationStore.RevokeAsync → SignOutAsync
 ```
 
 ## Webhook Receive Flow
 ```
-POST /webhook/{guid} (AllowAnonymous, rate-limited)
-  → ITokenCache.GetOrLoadAsync("token:{guid}") or DB lookup (includes inactive)
-  → read body (try/catch IOException → BadHttpRequestException)
-  → IRequestQueuePublisher.PublishAsync → XADD webhook-requests stream
-  ├── Active token:   return CustomResponse (or 200)
-  └── Inactive token: return 410 Gone
-  (request persisted by StreamWorker; audit trail always maintained)
+POST /webhook/{guid} (AllowAnonymous, rate-limited, [JsonInclude]-safe cache)
+  → ITokenCache.GetOrLoadAsync("token:{guid}") — 5min sliding
+       └── miss path uses GetByTokenIncludingInactiveAsync (active + inactive)
+  → read body (IOException → BadHttpRequestException → 400)
+  → IRequestQueuePublisher.PublishAsync → XADD webhook-requests
+  ├── Active   → return CustomResponse or 200
+  └── Inactive → return 410 Gone (request still persisted for audit)
 
-StreamWorker picks up from stream:
-  → XREADGROUP webhook-requests → deserialize → IWebhookRequestRepository.AddAsync → XACK
-  → ISubscriber.PublishAsync("sse:{tokenId}", summaryJson)
-
-API RedisSseBridgeService:
-  → SUBSCRIBE sse:* → SseNotifier.NotifyAsync → Channel<SseEvent> → SSE HTTP response
+StreamWorker: XREADGROUP → IWebhookRequestRepository.AddAsync → XACK → PUBLISH sse:{tokenId}
+API: SUBSCRIBE sse:* → SseNotifier.NotifyAsync → Channel<SseEvent> → "event: request"
 ```
-
-## SSE Flow
-```
-GET /api/tokens/{id}/sse (authenticated)
-  → SseNotifier.SubscribeAsync creates Channel<SseEvent>
-  → stream events until client disconnect or cancel
-  → wire event name: "event: request"
-  → max 10 concurrent connections per token (11th returns 429)
-
-Fan-out path: PUBLISH sse:{tokenId} → RedisSseBridgeService → SseNotifier.NotifyAsync
-```
-
-## Reverse Proxy (Nginx)
-- SSE routes use `proxy_buffering off` and 3600s timeout
-- `X-Forwarded-Proto` via `docker/frontend/nginx-maps.conf` (00-maps.conf)
-- All backends use `$forwarded_scheme` for cookie `Secure` flag
-
-## Resilience
-- EF Core retry: `EnableRetryOnFailure(3, 2s)`
-- Worker DB readiness: Polly retry (30×, exponential up to 30s) via `CanConnectAsync`
-- StreamWorker consumer name stable across restarts via `HOOKBIN_WORKER_ID` env var
-- PEL recovery: `XREADGROUP "0-0"` drains unACKed messages from previous consumer run
 
 ## Rate Limiting & Security
-- **Webhook receiver:** `webhook-receiver` fixed-window (configurable via `WebhookOptions.ReceiverRateLimitPerSecond`)
-- **Login brute-force:** 5 attempts per 1 minute
-- **Antiforgery:** `X-XSRF-TOKEN` required on state-changing requests
-- **Session revocation:** `ISessionRevocationStore` — logout revokes all active sessions instantly
-- **SSE subscriber cap:** Max 10 concurrent connections per token
+| Boundary | Policy | Source |
+|---|---|---|
+| `/api/auth/login` | Fixed window, 5/min | `AddRateLimiter` `login` policy |
+| `POST /webhook/{guid}` | Token bucket, per-route | `webhook-receiver` policy, `WebhookOptions.ReceiverRateLimitPerSecond` |
+| Cluster-wide session revocation | Redis set `session:revoked` | `ISessionRevocationStore` |
+| CSRF | `X-XSRF-TOKEN` header on writes | `AddAntiforgery` |
+| SSE concurrency | Max 10/token (11th → 429) | `SseNotifier` semaphore |
+
+## Reverse Proxy (Nginx)
+- SSE: `proxy_buffering off`, `proxy_read_timeout 3600s`
+- Header maps via `docker/frontend/nginx-maps.conf` — `$forwarded_scheme` drives cookie `Secure`
+
+## Resilience
+- EF Core: `EnableRetryOnFailure(3, 2s)`
+- Worker DB readiness: Polly retry 30× exponential up to 30s via `CanConnectAsync` (never `MigrateAsync` — API only)
+- Stable consumer name across restarts: `HOOKBIN_WORKER_ID`
+- PEL recovery on cold start: `XREADGROUP "0-0"` drains unACKed messages
+
+## Test Coverage (2026-05-13)
+| Layer | Tests | Mutation Score |
+|---|---:|---:|
+| Unit | 377 | Domain 86.4% / Application 90.4% (Stryker.NET 4.14.1) |
+| Architecture | 47 | n/a (structural) |
+| Integration | 85 | n/a (covers Infrastructure paths) |
+| E2E (Playwright) | 64 | n/a |
+| Frontend (Vitest) | 209 | n/a |
+| **Total** | **782** | API 73.4% / Infrastructure 52.7% (integration-tested) |
+
+Audit artifacts: `docs/AUDIT/BASELINE.md`, `docs/AUDIT/REMEDIATION.md`.
 
 ## Deployment Notes
-**HOOKBIN_BASE_URL precedence** (highest → lowest):
-1. `docker-compose.override.yml` → `Hookbin__BaseUrl: "${HOOKBIN_BASE_URL}"`
-2. `docker-compose.yml` → `Hookbin__BaseUrl: "${HOOKBIN_BASE_URL}"`
-3. `appsettings.Development.json` → `http://localhost:8080`
-4. `appsettings.json` → `""` (empty — startup validator fires if unset)
-
-**`.env` BCrypt hash quoting:** Values containing `$letter...` are treated as variable references by Docker Compose. Single-quote the hash: `AUTH_PASSWORD_HASH='$2b$12$...'`.
-
-**`jobs-worker` must run as single replica** — `RetentionCleanupService` has no leader election. Use `deploy.replicas: 1` in compose.
+- `HOOKBIN_BASE_URL` precedence: override → compose → appsettings.Development → appsettings (validator fires if empty)
+- `.env` BCrypt hash: must be single-quoted (`'$2b$12$...'`) — `$letter` triggers compose variable expansion
+- `jobs-worker` runs as `deploy.replicas: 1` (no leader election)
+- All env vars: `docs/ENV.md`

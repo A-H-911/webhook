@@ -38,6 +38,6 @@ export class ThemeService {
   }
 
   private applyClass(scheme: ColorScheme): void {
-    document.documentElement.classList.toggle('dark-theme', scheme === 'dark');
+    document.documentElement.setAttribute('data-theme', scheme);
   }
 }

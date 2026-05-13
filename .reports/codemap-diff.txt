@@ -1,90 +1,133 @@
-Codemap Diff Report — 2026-05-11 (Post-Fix Update)
-Generated after WebhookTokenRepository.UpdateAsync fix (EF Core owned entity persistence)
-Initial commit: 9062d68 (feat: add architecture tests, domain encapsulation, and FA alignment)
+Hookbin Codemap Update — 2026-05-13
+=====================================
 
-=== Files Modified (This Session) ===
+Previous codemap date:  2026-05-11 (architecture-tests + domain-encapsulation pass)
+This regeneration:      2026-05-13 (post zero-trust audit + UI redesign + README hero)
+Drift class:            HIGH (~40% across 5 codemaps) — but bounded to known scope
 
-docs/CODEMAPS/INDEX.md
-  - Last Updated header: added "WebhookTokenRepository.UpdateAsync fix for EF Core owned entities"
-  - Prepended new "Recent Changes — WebhookTokenRepository.UpdateAsync EF Core Fix" section
-    (bug description, root cause, failing tests resolved, integration test count 59/59, suite total 442/443)
+Files scanned this run
+----------------------
+  Backend source (src/):                59 .cs files
+  Test source (tests/):                 50 .cs files
+  Frontend source (frontend/src/app/):  61 TS/HTML/SCSS files (30 spec files)
+  Migrations (Infrastructure/):          6 EF Core migrations
+  Csproj / package.json:                 8 + 1
 
-docs/CODEMAPS/data.md
-  - EF Core Notes: appended owned entity update invariant warning
-    "CurrentValues.SetValues() does NOT propagate to OwnsOne-mapped entities — use mutation methods instead"
+Codemap files updated
+---------------------
+  docs/CODEMAPS/INDEX.md          (refreshed header + stack summary)
+  docs/CODEMAPS/architecture.md   (regenerated)
+  docs/CODEMAPS/backend.md        (regenerated)
+  docs/CODEMAPS/frontend.md       (regenerated)
+  docs/CODEMAPS/data.md           (regenerated)
+  docs/CODEMAPS/dependencies.md   (regenerated)
+  docs/CODEMAPS/CHANGES_2026_05_06.md  (untouched — historical pin)
 
-=== Files Modified (Previous Session: 2026-05-11 Architecture Pass) ===
+Significant changes detected since prior codemap (2026-05-11)
+-------------------------------------------------------------
 
-docs/CODEMAPS/architecture.md
-  - Header: test count 417 → 443 (added 26 arch tests)
-  - Added Architecture Tests enforcement block after Dependency Rule section
-    (26 rules, ArchUnitNET 0.13.3, CI parallel job <60s)
+[ARCHITECTURE]
+  + Zero-trust audit landed (docs/AUDIT/BASELINE.md + REMEDIATION.md)
+  + Stryker.NET 4.14.1 mutation testing introduced
+      Domain         86.36%
+      Application    90.38%
+      Infrastructure 52.66% (integration-tested, documented)
+      API            73.38%
+  + New architecture test classes (16 tests added):
+      Conventions/ZeroTrustInvariantsTests.cs    (12 tests, DANGER ZONE structural guards)
+      Conventions/OperationalSnapshotTests.cs    (4 tests, docker-compose + nginx + csproj)
+  + Total architecture tests:  31 → 47
 
-docs/CODEMAPS/backend.md
-  - Header: updated to reflect arch + encapsulation changes
-  - Added "Domain Entity Mutation Methods" section (WebhookToken + WebhookRequest methods)
-  - Added "Architecture Tests" section (26 rules, file layout, run command)
-  - Added note: WebhookOptionsValidator is in API.Options, not Application.Options
+[BACKEND]
+  + New CQRS handler:
+      Application/Requests/Commands/SetRequestNote/   (command + validator + handler)
+      Wired to PATCH /api/tokens/{tokenId}/requests/{id}/note
+  + Domain serialization fixes:
+      WebhookRequest.cs — [JsonInclude] added to ProcessingTimeMs (private-set)
+  + New unit tests:
+      Domain/WebhookRequestSerializationTests.cs
+      Domain/CustomResponseSerializationTests.cs
+      Application/TokenDtoSerializationTests.cs
+  + UpdateTokenCommandHandler now uses GetByIdIncludingInactiveAsync
+      (previously could not reactivate inactive tokens — caught by MCP audit)
 
-docs/CODEMAPS/dependencies.md
-  - Header: updated to reflect ArchUnitNET + FA alignment
-  - Testing section: added TngTech.ArchUnitNET 0.13.3, TngTech.ArchUnitNET.xUnit 0.13.1,
-    NetArchTest.eNhancedEdition 1.4.5, FluentAssertions 8.9.0 (unified)
-  - Tools section: added run-arch-tests.ps1/.sh scripts
+[DATA]
+  + New migration: 20260511160402_AddTokenNameAndRequestResponseAndCountry
+      Adds: WebhookToken.Name (NVARCHAR 80)
+      Adds: WebhookRequest.ResponseStatusCode (INT, nullable)
+      Adds: WebhookRequest.IpCountry (NVARCHAR 2, nullable)
+  + Total EF migrations: 5 → 6
 
-=== Files Unchanged ===
+[FRONTEND]
+  + Angular Material fully removed; only @angular/cdk retained (Overlay)
+  + New shared infrastructure (replaces MatDialog / MatSnackBar):
+      src/app/shared/modal/             ModalService + ModalRef + MODAL_REF/MODAL_DATA tokens
+      src/app/shared/toast/             ToastService (DOM-injected .toast)
+      src/app/shared/confirm-dialog/    ConfirmDialogComponent
+  + New shared components:
+      src/app/shared/json-tree/         JsonTreeComponent (request body tree view)
+      src/app/shared/json-highlight/    jsonHighlight pipe (raw body coloring)
+      src/app/shared/sparkline/         SparklineComponent (24h activity)
+  + DANGER ZONE invariant tests added:
+      core/interceptors/http-error.interceptor.spec.ts
+      core/services/sse.service.spec.ts  (reconnect after onerror; no reconnect after unsubscribe)
+  + Total Angular tests: 200 → 209
 
-docs/CODEMAPS/frontend.md       — no frontend changes in this commit
+[INTEGRATION]
+  + AuthRateLimiterTests.cs  (3 tests — login fixed-window 5/min, webhook-receiver token-bucket)
+  + TokenCacheInvalidationTests.cs +5 N-shot tests (SetCustomResponse cache-hit safety, etc.)
+  + Total integration tests: 77 → 85
 
-=== New Files Detected (since last scan) ===
+[E2E]
+  + SequentialCacheStateE2ETests.cs  (2 tests — replays MCP cache-hit walkthrough)
+  + ReactivateE2ETests.cs            (1 test — Bug 2 silent-404 scenario)
+  + 17 selector-drift failures fixed (mat-dialog-container → .modal-panel;
+    .btn-danger → .modal-panel .btn-danger; .code-block → .hdr-code/.body-code;
+    mat-select/mat-snack removed)
+  + Test names made unique-per-run (Guid suffix) to fix strict-mode violations
+    on accumulated duplicates
+  + Full E2E suite passing:           47/64 → 64/64
 
-tests/WebhookService.ArchitectureTests/                    (new project — 8 source files)
-  ArchitectureFixture.cs
-  WebhookService.ArchitectureTests.csproj
-  Layers/LayerDependencyTests.cs
-  Conventions/CqrsConventionTests.cs
-  Conventions/RepositoryEntityConventionTests.cs
-  Conventions/ControllerMiddlewareConventionTests.cs
-  Conventions/TestProjectConventionTests.cs
-  Structure/FolderNamespaceTests.cs
-scripts/run-arch-tests.ps1
-scripts/run-arch-tests.sh
+[DOCS]
+  + docs/assets/logo.svg          (new — 256x256 brand mark)
+  + README.md                     (added centered hero block: logo / wordmark /
+                                   tagline / 7 shields.io badges / quick-link nav)
+  + docs/AUDIT/BASELINE.md        (mutation-score baselines, 4 projects)
+  + docs/AUDIT/REMEDIATION.md     (phase-by-phase tracker)
 
-=== New Dependencies ===
+[DEPENDENCIES]
+  + dotnet-stryker 4.14.1         (dev tool — not in any .csproj)
+  + Architecture test packages    TngTech.ArchUnitNET 0.13.3, NetArchTest.eNhancedEdition 1.4.5
+  - @angular/material             REMOVED (custom modal/toast now use only @angular/cdk Overlay)
+  - karma, jasmine-core, @types/jasmine, @angular-devkit/build-angular  REMOVED
+    (Vitest 4 takes over)
 
-TngTech.ArchUnitNET          0.13.3       (ArchitectureTests — CLR ns: ArchUnitNET.*)
-TngTech.ArchUnitNET.xUnit    0.13.1       (ArchitectureTests — xUnit Check() adapter)
-NetArchTest.eNhancedEdition  1.4.5        (ArchitectureTests — HaveSourceFilePathMatchingNamespace)
-FluentAssertions             bumped       (IntegrationTests: 6.12.2 → 8.9.0, now uniform at 8.9.0)
+Test count drift
+----------------
+                  Pre (2026-05-11)    Post (2026-05-13)    Δ
+  Unit              310                 377                  +67
+  Architecture       26                  47                  +21
+  Integration        59                  85                  +26
+  E2E (Playwright)   48                  64                  +16
+  Frontend (Vitest) 118                 209                  +91
+  ------------------------------------------------------------
+  Total             561                 782                 +221
 
-=== Architecture Changes ===
+Staleness warnings
+------------------
+  None. All five codemaps last touched 2026-05-12 (≤2 days ago); regeneration cadence healthy.
 
-- CI: new architecture-test parallel job (no needs:, completes <60s)
-- Domain entities: WebhookToken + WebhookRequest use private setters + mutation methods
-- WebhookOptionsValidator: namespace Application.Options → API.Options (genuine mismatch surfaced by arch test)
+Token estimates per codemap (after regen)
+-----------------------------------------
+  architecture.md   ~900 tokens
+  backend.md        ~950 tokens
+  frontend.md       ~900 tokens
+  data.md           ~750 tokens
+  dependencies.md   ~850 tokens
+  All within the <1000-token target for efficient AI context loading.
 
-=== Test Suite Status ===
-
-Architecture:  26/26 ✅
-Unit:          310/310 ✅
-Integration:   59/59 ✅ (2 custom response tests fixed by SetValues→mutation method replacement)
-E2E:           47/48 (1 pre-existing flaky retention test)
-Frontend:      118/118 ✅
-─────────────────
-Total:         442/443 ✅ (99.8%)
-
-=== Bug Fixes (This Session) ===
-
-- **WebhookTokenRepository.UpdateAsync** — Direct mutation methods on tracked entity instead of CurrentValues.SetValues()
-  Files: `src/WebhookService.Infrastructure/Persistence/Repositories/WebhookTokenRepository.cs`
-  Architecture changes: None
-  Breaking changes: None
-  Test impact: Fixed 2 integration tests (SetCustomResponse, PostToWebhook_WithCustomResponse)
-
-=== Diff Percentage ===
-
-~2% across all codemaps — minimal surgical updates (threshold: 30%)
-
-=== Staleness Warnings ===
-
-None — all codemaps verified current 2026-05-11.
+Diff approval
+-------------
+  /ecc:update-codemaps invoked by user — explicit authorization to regenerate.
+  All five files overwritten in place; no destructive removal of historical notes
+  (CHANGES_2026_05_06.md retained as immutable history pin).

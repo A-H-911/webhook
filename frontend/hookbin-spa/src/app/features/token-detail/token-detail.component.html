@@ -1,60 +1,100 @@
 <div class="detail-page">
 
-  <!-- Top bar -->
-  <div class="top-bar">
-    <button mat-icon-button routerLink="/dashboard" matTooltip="Back to dashboard">
-      <mat-icon>arrow_back</mat-icon>
-    </button>
+  <!-- Inspector toolbar -->
+  <div class="inspector-toolbar">
+    <a routerLink="/dashboard" class="back-btn" title="Back to dashboard">
+      <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+        <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </a>
 
     <div class="url-section">
+      @if (connected()) {
+        <span class="live-tag">
+          <span class="live-dot"></span>LIVE
+        </span>
+      }
       @if (token()) {
-        <code class="webhook-url">{{ token()!.webhookUrl }}</code>
-        <button mat-icon-button matTooltip="Copy URL" (click)="copyUrl()">
-          <mat-icon>content_copy</mat-icon>
+        <code class="webhook-url" [title]="token()!.webhookUrl">{{ token()!.webhookUrl }}</code>
+        <button class="icon-btn" title="Copy URL" (click)="copyUrl()">
+          <svg viewBox="0 0 24 24" fill="none" width="15" height="15">
+            <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  stroke="currentColor" stroke-width="2"/>
+          </svg>
         </button>
-        <span class="sse-dot" [class.connected]="connected()"
-              [matTooltip]="connected() ? 'Live — receiving events' : 'Connecting…'"></span>
       }
     </div>
 
     <div class="top-actions">
-      @if (token()?.customResponse) {
-        <span class="custom-badge">Custom response active</span>
-      }
-      <button mat-stroked-button (click)="openCustomResponse()">
-        <mat-icon>tune</mat-icon> Response
+      <button class="btn" (click)="openCustomResponse()">
+        <svg viewBox="0 0 24 24" fill="none" width="14" height="14"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+        </svg>
+        Response
       </button>
-      <button mat-stroked-button color="warn" (click)="clearAll()">
-        <mat-icon>clear_all</mat-icon> Clear
+      <button class="btn" (click)="clearAll()">
+        <svg viewBox="0 0 24 24" fill="none" width="14" height="14"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        </svg>
+        Clear
       </button>
-      <button mat-flat-button color="warn" (click)="deleteToken()">
-        <mat-icon>delete</mat-icon> Delete URL
+      <button class="btn btn-danger" (click)="deleteToken()">
+        <svg viewBox="0 0 24 24" fill="none" width="14" height="14"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        </svg>
+        Delete URL
       </button>
     </div>
-  </div>
-
-  <mat-divider />
+  </div><!-- /.inspector-toolbar -->
 
   <!-- Two-panel layout -->
   <div class="panels">
 
     <!-- Left: request list -->
     <div class="list-panel">
-      <div class="search-row">
-        <mat-form-field appearance="outline" class="search-field">
-          <mat-label>Search requests</mat-label>
-          <mat-icon matPrefix>search</mat-icon>
-          <input matInput [ngModel]="search"
-                 (ngModelChange)="onSearchChange($event)"
-                 placeholder="method, path, headers…" />
-        </mat-form-field>
+
+      <!-- Search + filters -->
+      <div class="filter-bar">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" width="14" height="14">
+            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
+            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" type="text" [value]="search"
+                 (input)="onSearchChange($any($event.target).value)"
+                 placeholder="Search requests…" />
+        </div>
+
+        <div class="filter-pills">
+          @for (m of METHODS; track m) {
+            <button class="pill" [class.active]="selectedMethods().includes(m)"
+                    [attr.data-method]="m" (click)="toggleMethod(m)">{{ m }}</button>
+          }
+          <div class="pill-sep"></div>
+          @for (g of STATUS_GROUPS; track g) {
+            <button class="pill status-pill"
+                    [class.active]="selectedStatusGroups().includes(g)"
+                    [class.s2]="g===2" [class.s3]="g===3" [class.s4]="g===4" [class.s5]="g===5"
+                    (click)="toggleStatusGroup(g)">{{ g }}xx</button>
+          }
+        </div>
       </div>
 
       @if (loading()) {
-        <div class="list-spinner"><mat-spinner diameter="36" /></div>
+        <div class="list-spinner">
+          <svg viewBox="0 0 24 24" fill="none" width="24" height="24" class="spinning">
+            <circle cx="12" cy="12" r="10" stroke="var(--border)" stroke-width="2"/>
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
       } @else if (requests().length === 0) {
         <div class="list-empty">
-          <mat-icon>{{ search ? 'search_off' : 'inbox' }}</mat-icon>
           <p>{{ search ? 'No matching requests found.' : 'No requests yet. Send an HTTP request to the URL above.' }}</p>
         </div>
       } @else {
@@ -65,152 +105,253 @@
             }
             <div class="request-row"
                  [class.selected]="selectedDetail()?.id === req.id"
+                 [class.new-row]="isNewRow(req.id)"
                  (click)="selectRequest(req)">
               <span class="method-badge" [attr.data-method]="req.method">{{ req.method }}</span>
               <div class="req-info">
                 <span class="req-path">{{ req.path }}</span>
                 <span class="req-meta">
-                  {{ req.receivedAt | date:'HH:mm:ss.SSS' }}<span class="tz-hint"> ({{ localTz }})</span>
-                  &middot; {{ req.sizeBytes ?? 0 }} B &middot; {{ req.ipAddress ?? '' }}
+                  {{ req.receivedAt | date:'HH:mm:ss' }}
+                  &middot; {{ req.sizeBytes ?? 0 }} B
+                  &middot; {{ req.ipAddress ?? '' }}
+                  @if (req.ipCountry) {
+                    &middot; {{ req.ipCountry }}
+                  }
                 </span>
               </div>
-              <button mat-icon-button matTooltip="Delete" class="row-action"
-                      (click)="deleteRequest(req, $event)">
-                <mat-icon>delete</mat-icon>
+              @if (req.responseStatusCode) {
+                <span class="status-badge" [ngClass]="statusClass(req.responseStatusCode)">
+                  {{ req.responseStatusCode }}
+                </span>
+              }
+              <button class="icon-btn row-del" title="Delete" (click)="deleteRequest(req, $event)">
+                <svg viewBox="0 0 24 24" fill="none" width="13" height="13">
+                  <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
               </button>
             </div>
           }
         </div>
 
-        <div class="pagination">
-          <button mat-icon-button [disabled]="page <= 1" (click)="prevPage()">
-            <mat-icon>chevron_left</mat-icon>
-          </button>
-          <span>{{ page }} / {{ totalPages() }} ({{ total() }} total)</span>
-          <button mat-icon-button [disabled]="page >= totalPages()" (click)="nextPage()">
-            <mat-icon>chevron_right</mat-icon>
-          </button>
+        <div class="req-pane-foot">
+          <span class="req-pane-foot-count">{{ total() }} total</span>
+          <div class="pager">
+            <button class="icon-btn" [disabled]="page <= 1" (click)="prevPage()" title="Previous page">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <span class="pager-label">Page {{ page }} / {{ totalPages() }}</span>
+            <button class="icon-btn" [disabled]="page >= totalPages()" (click)="nextPage()" title="Next page">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
       }
     </div>
 
-    <mat-divider [vertical]="true" />
+    <div class="panel-divider"></div>
 
     <!-- Right: detail panel -->
     <div class="detail-panel">
       @if (detailLoading()) {
-        <div class="list-spinner"><mat-spinner diameter="36" /></div>
+        <div class="list-spinner">
+          <svg viewBox="0 0 24 24" fill="none" width="24" height="24" class="spinning">
+            <circle cx="12" cy="12" r="10" stroke="var(--border)" stroke-width="2"/>
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
       } @else if (!selectedDetail()) {
         <div class="list-empty">
-          <mat-icon>touch_app</mat-icon>
           <p>Select a request to inspect its details.</p>
         </div>
       } @else {
         <div class="detail-content">
+          <!-- Panel title row -->
           <div class="detail-header">
             <span class="method-badge" [attr.data-method]="selectedDetail()!.method">
               {{ selectedDetail()!.method }}
             </span>
-            <span class="req-path">{{ selectedDetail()!.path }}</span>
-            <button mat-icon-button matTooltip="Export JSON" (click)="exportSelected()">
-              <mat-icon>download</mat-icon>
+            <div class="detail-path-group">
+              <span class="detail-path">{{ selectedDetail()!.path }}@if (selectedDetail()!.queryString) {<span class="query-suffix">{{ selectedDetail()!.queryString }}</span>}</span>
+              @if (selectedDetail()!.responseStatusCode) {
+                <span class="status-badge" [ngClass]="statusClass(selectedDetail()!.responseStatusCode)">
+                  {{ selectedDetail()!.responseStatusCode }}
+                </span>
+              }
+            </div>
+            <span class="detail-spacer"></span>
+            <span class="detail-meta-time">
+              {{ selectedDetail()!.receivedAt | date:'HH:mm:ss.SSS' }}
+              · {{ selectedDetail()!.sizeBytes }} B
+            </span>
+            <button class="btn btn-sm" title="Export JSON" (click)="exportSelected()">
+              <svg viewBox="0 0 24 24" fill="none" width="13" height="13">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Export
+            </button>
+            <button class="btn btn-sm btn-danger" title="Delete request"
+                    (click)="deleteRequest(selectedDetail()!, $any($event))">
+              <svg viewBox="0 0 24 24" fill="none" width="13" height="13">
+                <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Delete
             </button>
           </div>
 
           <div class="detail-grid">
-            <span class="detail-label">Received</span>
-            <span>{{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss.SSS' }} <span class="tz-hint">({{ localTz }})</span></span>
 
-            <span class="detail-label">IP</span>
-            <span class="ip-row">
-              {{ selectedDetail()!.ipAddress }}
-              <span class="threat-links">
-                <a [href]="threatLinks().whois" target="_blank" rel="noopener noreferrer">Whois</a>
-                <a [href]="threatLinks().shodan" target="_blank" rel="noopener noreferrer">Shodan</a>
-                <a [href]="threatLinks().virustotal" target="_blank" rel="noopener noreferrer">VirusTotal</a>
-                <a [href]="threatLinks().censys" target="_blank" rel="noopener noreferrer">Censys</a>
-              </span>
-            </span>
-
-            @if (selectedDetail()!.processingTimeMs !== null) {
-              <span class="detail-label">Pipeline</span>
-              <span>{{ selectedDetail()!.processingTimeMs }} ms</span>
-            }
-
-            @if (selectedDetail()!.contentType) {
-              <span class="detail-label">Content-Type</span>
-              <code>{{ selectedDetail()!.contentType }}</code>
-            }
-
-            @if (selectedDetail()!.userAgent) {
-              <span class="detail-label">User-Agent</span>
-              <span class="truncate">{{ selectedDetail()!.userAgent }}</span>
-            }
-          </div>
-
-          @if (parsedQueryParams().length > 0) {
-            <div class="section-title">Query Parameters</div>
-            <table class="kv-table">
-              <tbody>
-                @for (param of parsedQueryParams(); track param[0] + param[1]) {
-                  <tr>
-                    <td class="kv-key">{{ param[0] }}</td>
-                    <td class="kv-val">{{ param[1] }}</td>
-                  </tr>
+            <!-- OVERVIEW kv-card -->
+            <div class="kv-card">
+              <div class="kv-head">Overview</div>
+              <div class="kv-grid">
+                <div class="k">Received</div>
+                <div class="v">
+                  {{ selectedDetail()!.receivedAt | date:'MMM d, y, HH:mm:ss' }}
+                  <span class="tz-hint">({{ localTz }})</span>
+                </div>
+                <div class="k">IP</div>
+                <div class="v with-actions">
+                  <span>
+                    {{ selectedDetail()!.ipAddress }}
+                    @if (selectedDetail()!.ipCountry) {
+                      <span class="ip-country">&middot; {{ selectedDetail()!.ipCountry }}</span>
+                    }
+                  </span>
+                  <span class="threat-links">
+                    <a class="threat-pill" [href]="threatLinks().whois" target="_blank" rel="noopener noreferrer">Whois</a>
+                    <a class="threat-pill" [href]="threatLinks().shodan" target="_blank" rel="noopener noreferrer">Shodan</a>
+                    <a class="threat-pill" [href]="threatLinks().virustotal" target="_blank" rel="noopener noreferrer">VirusTotal</a>
+                  </span>
+                </div>
+                @if (selectedDetail()!.userAgent) {
+                  <div class="k">User-Agent</div>
+                  <div class="v">{{ selectedDetail()!.userAgent }}</div>
                 }
-              </tbody>
-            </table>
-          }
-
-          <div class="section-title">Headers</div>
-          <pre class="code-block">{{ formatHeaders(selectedDetail()!.headers) }}</pre>
-
-          @if (parsedFormValues().length > 0) {
-            <div class="section-title">Form Values</div>
-            <table class="kv-table">
-              <tbody>
-                @for (param of parsedFormValues(); track param[0] + param[1]) {
-                  <tr>
-                    <td class="kv-key">{{ param[0] }}</td>
-                    <td class="kv-val">{{ param[1] }}</td>
-                  </tr>
+                @if (selectedDetail()!.contentType) {
+                  <div class="k">Content-Type</div>
+                  <div class="v">{{ selectedDetail()!.contentType }}</div>
                 }
-              </tbody>
-            </table>
-          }
-
-          @if (selectedDetail()!.body !== null) {
-            <div class="section-title">
-              Body
-              @if (selectedDetail()!.isBodyBase64) {
-                <span class="badge">base64 decoded</span>
-              }
-            </div>
-            <pre class="code-block body-block">{{ decodeBody(selectedDetail()!) }}</pre>
-          }
-
-          <div class="section-title">Note</div>
-          @if (noteEditing()) {
-            <div class="note-editor">
-              <textarea class="note-textarea" [(ngModel)]="noteValue" rows="3" maxlength="2000"
-                        placeholder="Add a note…"></textarea>
-              <div class="note-actions">
-                <button mat-button (click)="cancelNoteEdit()">Cancel</button>
-                <button mat-flat-button color="primary" [disabled]="noteSaving()" (click)="saveNote()">
-                  {{ noteSaving() ? 'Saving…' : 'Save' }}
-                </button>
+                <div class="k">Size</div>
+                <div class="v">{{ selectedDetail()!.sizeBytes }} B</div>
               </div>
             </div>
-          } @else {
-            <div class="note-view" (click)="startNoteEdit()">
-              @if (selectedDetail()!.note) {
-                <span class="note-text">{{ selectedDetail()!.note }}</span>
-              } @else {
-                <span class="note-placeholder">Click to add a note…</span>
-              }
-              <mat-icon class="note-edit-icon">edit</mat-icon>
+
+            <!-- Query Parameters -->
+            @if (parsedQueryParams().length > 0) {
+              <div class="kv-card">
+                <div class="kv-head">
+                  Query Parameters
+                  <span class="count">{{ parsedQueryParams().length }}</span>
+                </div>
+                <table class="kv-table">
+                  <thead><tr><th>Key</th><th>Value</th></tr></thead>
+                  <tbody>
+                    @for (param of parsedQueryParams(); track param[0] + param[1]) {
+                      <tr><td>{{ param[0] }}</td><td>{{ param[1] }}</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+
+            <!-- Headers kv-card -->
+            <div class="kv-card">
+              <div class="kv-head">
+                Headers
+                <span class="count">{{ headerCount() }}</span>
+              </div>
+              <div class="hdr-code">
+                @for (h of parsedHeaders(); track h.name + h.value) {
+                  <div class="hdr-row">
+                    <span class="hkey">{{ h.name }}</span><span class="punct">: </span><span class="hval">{{ h.value }}</span>
+                  </div>
+                }
+              </div>
             </div>
-          }
+
+            <!-- Form Values -->
+            @if (parsedFormValues().length > 0) {
+              <div class="kv-card">
+                <div class="kv-head">
+                  Form Values
+                  <span class="count">{{ parsedFormValues().length }}</span>
+                </div>
+                <table class="kv-table">
+                  <thead><tr><th>Key</th><th>Value</th></tr></thead>
+                  <tbody>
+                    @for (param of parsedFormValues(); track param[0] + param[1]) {
+                      <tr><td>{{ param[0] }}</td><td>{{ param[1] }}</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+
+            <!-- Body -->
+            @if (selectedDetail()!.body !== null) {
+              <div class="body-card">
+                <div class="body-head">
+                  <span>Body</span>
+                  <div class="body-tabs">
+                    <button class="body-tab" [class.active]="bodyViewMode() === 'tree'"
+                            (click)="bodyViewMode.set('tree')">TREE</button>
+                    <button class="body-tab" [class.active]="bodyViewMode() === 'pretty'"
+                            (click)="bodyViewMode.set('pretty')">PRETTY</button>
+                    <button class="body-tab" [class.active]="bodyViewMode() === 'raw'"
+                            (click)="bodyViewMode.set('raw')">RAW</button>
+                  </div>
+                </div>
+
+                @if (bodyViewMode() === 'tree' && parsedBody() !== null) {
+                  <input class="body-search" type="search" placeholder="Filter keys or values…"
+                         [value]="bodySearch()" (input)="onBodySearchChange($event)" />
+                }
+
+                @switch (bodyViewMode()) {
+                  @case ('tree') {
+                    @if (parsedBody() !== null) {
+                      <app-json-tree
+                        [value]="parsedBody()"
+                        [filter]="bodySearch()"
+                        [autoExpandTo]="defaultExpandPath()" />
+                    } @else {
+                      <pre class="body-code">{{ decodeBody(selectedDetail()!) }}</pre>
+                    }
+                  }
+                  @case ('pretty') {
+                    @if (parsedBody() !== null) {
+                      <pre class="body-code body-code--highlighted"
+                           [innerHTML]="decodeBody(selectedDetail()!) | jsonHighlight"></pre>
+                    } @else {
+                      <pre class="body-code">{{ decodeBody(selectedDetail()!) }}</pre>
+                    }
+                  }
+                  @case ('raw') {
+                    <pre class="body-code">{{ selectedDetail()!.body ?? '' }}</pre>
+                  }
+                }
+              </div>
+            }
+
+            <!-- Note -->
+            <div class="note-card">
+              <div class="kv-head">
+                <span>Note</span>
+                @if (noteSaving()) { <span class="note-status">Saving…</span> }
+              </div>
+              <textarea class="note-textarea" [(ngModel)]="noteValue" (blur)="saveNote()"
+                        maxlength="2000"
+                        placeholder="Add a note for this request (e.g. tagged for retry investigation)…"></textarea>
+            </div>
+
+          </div><!-- /.detail-grid -->
         </div>
       }
     </div>

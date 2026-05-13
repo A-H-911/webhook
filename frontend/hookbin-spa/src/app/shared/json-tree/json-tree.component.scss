@@ -1,0 +1,58 @@
+.json-tree {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.8;
+  padding: 8px 12px;
+  color: var(--text);
+  background: var(--bg-1);
+  border-radius: 0 0 var(--radius) var(--radius);
+  max-height: 600px;
+  overflow: auto;
+}
+
+.json-row {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  white-space: nowrap;
+  min-height: 22px;
+
+  &.json-row--match {
+    background: var(--amber-soft);
+    border-radius: 2px;
+  }
+}
+
+.json-toggle {
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  &:hover { color: var(--text); }
+  &:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+}
+
+.json-toggle-spacer {
+  width: 14px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.json-row .key   { color: var(--cyan); }
+.json-row .str   { color: var(--green); }
+.json-row .num   { color: var(--amber); }
+.json-row .bool  { color: var(--violet); }
+.json-row .null  { color: var(--red); }
+.json-row .punct { color: var(--text-faint); }

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Hookbin.Domain.Entities;
 
 public sealed class WebhookRequest
@@ -15,7 +17,11 @@ public sealed class WebhookRequest
     public string IpAddress { get; init; } = "unknown";
     public string? UserAgent { get; init; }
     public long SizeBytes { get; init; }
-    public long? ProcessingTimeMs { get; private set; }
+    // [JsonInclude] is required so the Redis Stream JSON round-trip preserves the value
+    // set via RecordProcessingTime(). System.Text.Json's default deserializer skips
+    // private-set properties; without this attribute, the publisher would silently lose
+    // ProcessingTimeMs on its way through the queue. See WebhookRequestSerializationTests.
+    [JsonInclude] public long? ProcessingTimeMs { get; private set; }
     public string? Note { get; init; }
     public int? ResponseStatusCode { get; init; }
     public string? IpCountry { get; init; }

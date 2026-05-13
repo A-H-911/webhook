@@ -35,7 +35,7 @@ public sealed class UpdateTokenCommandHandlerTests
     {
         var id = Guid.NewGuid();
         var token = MakeToken(id);
-        _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
+        _repo.GetByIdIncludingInactiveAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         var result = await CreateHandler().Handle(new UpdateTokenCommand(id, "new-name", "updated", false), CancellationToken.None);
 
@@ -49,7 +49,7 @@ public sealed class UpdateTokenCommandHandlerTests
     [Fact]
     public async Task Handle_ReturnsNull_WhenTokenNotFound()
     {
-        _repo.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((WebhookToken?)null);
+        _repo.GetByIdIncludingInactiveAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((WebhookToken?)null);
 
         var result = await CreateHandler().Handle(
             new UpdateTokenCommand(Guid.NewGuid(), "test-name", "x", true), CancellationToken.None);
@@ -63,7 +63,7 @@ public sealed class UpdateTokenCommandHandlerTests
     {
         var id = Guid.NewGuid();
         var token = MakeToken(id);
-        _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
+        _repo.GetByIdIncludingInactiveAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new UpdateTokenCommand(id, "new-name", "new", true), CancellationToken.None);
 

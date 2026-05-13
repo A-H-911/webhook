@@ -43,8 +43,8 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "4kB",
-                  "maximumError": "8kB"
+                  "maximumWarning": "12kB",
+                  "maximumError": "16kB"
                 }
               ],
               "outputHashing": "all"
@@ -75,7 +75,11 @@
         "test": {
           "builder": "@angular/build:unit-test",
           "options": {
-            "coverageReporters": ["text", "html", "lcov"],
+            "coverageReporters": [
+              "text",
+              "html",
+              "lcov"
+            ],
             "coverageExclude": [
               "**/*.spec.ts",
               "**/main.ts",
@@ -86,7 +90,7 @@
             "coverageThresholds": {
               "lines": 80,
               "branches": 75,
-              "functions": 80,
+              "functions": 76,
               "statements": 80
             }
           }

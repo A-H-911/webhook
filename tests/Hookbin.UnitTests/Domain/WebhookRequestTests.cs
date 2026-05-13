@@ -91,4 +91,77 @@ public sealed class WebhookRequestTests
 
         request.Token.Should().BeNull();
     }
+
+    [Fact]
+    public void ProcessingTimeMs_ShouldBeNullByDefault()
+    {
+        var request = Build();
+
+        request.ProcessingTimeMs.Should().BeNull();
+    }
+
+    [Fact]
+    public void RecordProcessingTime_StoresPositiveValue()
+    {
+        var request = Build();
+
+        request.RecordProcessingTime(50);
+
+        request.ProcessingTimeMs.Should().Be(50);
+    }
+
+    [Fact]
+    public void RecordProcessingTime_StoresZero()
+    {
+        var request = Build();
+
+        request.RecordProcessingTime(0);
+
+        request.ProcessingTimeMs.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-1000)]
+    [InlineData(long.MinValue)]
+    public void RecordProcessingTime_ClampsNegativeToZero(long input)
+    {
+        var request = Build();
+
+        request.RecordProcessingTime(input);
+
+        request.ProcessingTimeMs.Should().Be(0);
+    }
+
+    [Fact]
+    public void RecordProcessingTime_PreservesLargePositiveValues()
+    {
+        var request = Build();
+
+        request.RecordProcessingTime(long.MaxValue);
+
+        request.ProcessingTimeMs.Should().Be(long.MaxValue);
+    }
+
+    [Fact]
+    public void RecordProcessingTime_LatestCallWins()
+    {
+        var request = Build();
+
+        request.RecordProcessingTime(10);
+        request.RecordProcessingTime(-5);
+
+        request.ProcessingTimeMs.Should().Be(0);
+    }
+
+    [Fact]
+    public void RecordProcessingTime_OverwritesPreviousValue()
+    {
+        var request = Build();
+
+        request.RecordProcessingTime(100);
+        request.RecordProcessingTime(200);
+
+        request.ProcessingTimeMs.Should().Be(200);
+    }
 }

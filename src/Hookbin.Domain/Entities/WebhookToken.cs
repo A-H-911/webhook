@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Hookbin.Domain.ValueObjects;
 
 namespace Hookbin.Domain.Entities;
@@ -6,11 +7,16 @@ public sealed class WebhookToken
 {
     public Guid Id { get; init; }
     public Guid Token { get; init; }
-    public string Name { get; private set; } = string.Empty;
-    public string? Description { get; private set; }
+    // [JsonInclude] is required because System.Text.Json's default behavior skips
+    // properties with non-public setters. Without it, RedisTokenCache cache-hits
+    // would silently return tokens with default values for these fields — losing
+    // CustomResponse and the deactivated flag for up to 5 minutes (the cache TTL).
+    // See WebhookTokenSerializationTests for the regression net.
+    [JsonInclude] public string Name { get; private set; } = string.Empty;
+    [JsonInclude] public string? Description { get; private set; }
     public DateTimeOffset CreatedAt { get; init; }
-    public bool IsActive { get; private set; } = true;
-    public CustomResponse? CustomResponse { get; private set; }
+    [JsonInclude] public bool IsActive { get; private set; } = true;
+    [JsonInclude] public CustomResponse? CustomResponse { get; private set; }
 
     public void UpdateName(string name)
     {

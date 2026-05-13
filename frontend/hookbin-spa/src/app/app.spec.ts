@@ -9,7 +9,7 @@ describe('App', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [provideRouter([])],
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
     }).compileComponents();
   });
 
@@ -22,16 +22,16 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.brand-link')?.textContent).toContain('Hookbin');
+    expect(compiled.querySelector('.brand-name')?.textContent).toContain('Hookbin');
   });
 
   it('should render the theme toggle button', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    const btn = compiled.querySelector('button[mat-icon-button]');
+    const btn = compiled.querySelector('button.icon-btn[title]');
     expect(btn).toBeTruthy();
-    expect(btn?.getAttribute('aria-label')).toContain('mode');
+    expect(btn?.getAttribute('title')).toContain('mode');
   });
 });
 

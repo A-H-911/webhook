@@ -1,21 +1,22 @@
 import { TestBed } from '@angular/core/testing';
-import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { CustomResponseDialogComponent } from './custom-response-dialog.component';
 import { CustomResponse } from '../../core/models/token.model';
+import { MODAL_DATA, MODAL_REF } from '../../shared/modal/modal-tokens';
+import { ModalRef } from '../../shared/modal/modal-ref';
 
 function setup(data: CustomResponse | null = null) {
-  const dialogRef = { close: vi.fn() };
+  const modalRef = { close: vi.fn() } as unknown as ModalRef<unknown>;
   TestBed.configureTestingModule({
     imports: [CustomResponseDialogComponent, NoopAnimationsModule],
     providers: [
-      { provide: MAT_DIALOG_DATA, useValue: data },
-      { provide: MatDialogRef, useValue: dialogRef },
+      { provide: MODAL_DATA, useValue: data },
+      { provide: MODAL_REF, useValue: modalRef },
     ],
   });
   const fixture = TestBed.createComponent(CustomResponseDialogComponent);
   fixture.detectChanges();
-  return { fixture, component: fixture.componentInstance, dialogRef };
+  return { fixture, component: fixture.componentInstance, modalRef };
 }
 
 describe('CustomResponseDialogComponent', () => {
@@ -68,40 +69,40 @@ describe('CustomResponseDialogComponent', () => {
   // ── save ────────────────────────────────────────────────────────────────
 
   it('save closes dialog with action save and dto', () => {
-    const { component, dialogRef } = setup();
+    const { component, modalRef } = setup();
     component.statusCode = 201;
     component.contentType = 'text/plain';
     component.body = 'hello';
     component.headersControl.setValue('{}');
     component.save();
-    expect(dialogRef.close).toHaveBeenCalledWith({
+    expect(modalRef.close).toHaveBeenCalledWith({
       action: 'save',
       dto: { statusCode: 201, contentType: 'text/plain', body: 'hello', headers: '{}' },
     });
   });
 
   it('save uses empty headers as {}', () => {
-    const { component, dialogRef } = setup();
+    const { component, modalRef } = setup();
     component.headersControl.setValue('');
     component.save();
-    const call = dialogRef.close.mock.calls[0][0];
+    const call = (modalRef.close as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.dto.headers).toBe('{}');
   });
 
   it('save uses null body when body is whitespace only', () => {
-    const { component, dialogRef } = setup();
+    const { component, modalRef } = setup();
     component.body = '   ';
     component.headersControl.setValue('{}');
     component.save();
-    const call = dialogRef.close.mock.calls[0][0];
+    const call = (modalRef.close as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.dto.body).toBeNull();
   });
 
   it('save does not close when headersControl is invalid', () => {
-    const { component, dialogRef } = setup();
+    const { component, modalRef } = setup();
     component.headersControl.setValue('{bad json}');
     component.save();
-    expect(dialogRef.close).not.toHaveBeenCalled();
+    expect(modalRef.close).not.toHaveBeenCalled();
   });
 
   // ── reset ────────────────────────────────────────────────────────────────
@@ -113,8 +114,8 @@ describe('CustomResponseDialogComponent', () => {
       body: null,
       headers: '{}',
     };
-    const { component, dialogRef } = setup(cr);
+    const { component, modalRef } = setup(cr);
     component.reset();
-    expect(dialogRef.close).toHaveBeenCalledWith({ action: 'reset' });
+    expect(modalRef.close).toHaveBeenCalledWith({ action: 'reset' });
   });
 });

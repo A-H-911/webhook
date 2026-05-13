@@ -20,7 +20,7 @@ public sealed class StreamWorkerE2ETests(DashboardE2EFixture fixture)
 
     private async Task<(string id, string webhookPath)> CreateTokenAsync(string desc)
     {
-        var r = await Api.PostAsJsonAsync("/api/tokens", new { description = desc });
+        var r = await Api.PostAsJsonAsync("/api/tokens", new { name = desc });
         r.EnsureSuccessStatusCode();
         var j = await r.Content.ReadFromJsonAsync<JsonElement>();
         return (
