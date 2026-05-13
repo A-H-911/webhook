@@ -20,22 +20,31 @@ public sealed class RedisSseBridgeServiceTests
     }
 
     // Starts the service and captures the subscribe callback for direct invocation in tests.
+    // Uses a TaskCompletionSource so the test waits for the callback to actually arrive
+    // (rather than a fixed sleep that races with the background task on slow CI hosts).
     private async Task<(RedisSseBridgeService service, Action<RedisChannel, RedisValue> callback)> StartAndCaptureAsync()
     {
-        Action<RedisChannel, RedisValue>? captured = null;
+        var captureSignal = new TaskCompletionSource<Action<RedisChannel, RedisValue>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
         _subscriber
             .SubscribeAsync(
                 Arg.Any<RedisChannel>(),
-                Arg.Do<Action<RedisChannel, RedisValue>>(cb => captured = cb),
+                Arg.Do<Action<RedisChannel, RedisValue>>(cb => captureSignal.TrySetResult(cb)),
                 Arg.Any<CommandFlags>())
             .Returns(Task.CompletedTask);
 
         var svc = CreateService();
         await svc.StartAsync(CancellationToken.None);
-        await Task.Delay(50); // let ExecuteAsync reach SubscribeAsync in its background task
 
-        captured.Should().NotBeNull("SubscribeAsync callback must be captured after startup");
-        return (svc, captured!);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var timeout = Task.Delay(Timeout.Infinite, cts.Token);
+        var completed = await Task.WhenAny(captureSignal.Task, timeout);
+        completed.Should().Be(captureSignal.Task,
+            "SubscribeAsync callback must be captured after startup");
+
+        var captured = await captureSignal.Task;
+        return (svc, captured);
     }
 
     // ── Subscription lifecycle ────────────────────────────────────────────────
@@ -43,15 +52,20 @@ public sealed class RedisSseBridgeServiceTests
     [Fact]
     public async Task StartAsync_SubscribesToPattern_SseWildcard()
     {
-        // Arrange
+        // Arrange — signal completion the moment the background task calls SubscribeAsync,
+        // so the test does not race a fixed Task.Delay on slow CI hosts.
+        var subscribeSignal = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         _subscriber
             .SubscribeAsync(Arg.Any<RedisChannel>(), Arg.Any<Action<RedisChannel, RedisValue>>(), Arg.Any<CommandFlags>())
-            .Returns(Task.CompletedTask);
+            .Returns(_ => { subscribeSignal.TrySetResult(true); return Task.CompletedTask; });
         var svc = CreateService();
 
         // Act
         await svc.StartAsync(CancellationToken.None);
-        await Task.Delay(50);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var completed = await Task.WhenAny(subscribeSignal.Task, Task.Delay(Timeout.Infinite, cts.Token));
+        completed.Should().Be(subscribeSignal.Task, "SubscribeAsync must be invoked during startup");
 
         // Assert
         await _subscriber.Received(1).SubscribeAsync(
