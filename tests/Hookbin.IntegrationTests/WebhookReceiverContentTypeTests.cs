@@ -116,13 +116,14 @@ public sealed class WebhookReceiverContentTypeTests(FormConsumingWebAppFactory f
     }
 
     [Fact]
-    public async Task Receiver_FormEncodedBody_InactiveToken_StillPersists_Returns410()
+    public async Task Receiver_FormEncodedBody_DeactivatedToken_StillPersists_Returns410()
     {
-        // Inactive tokens always persist the request for audit purposes (returns 410 Gone).
+        // Deactivated (isActive=false) tokens always persist the request for audit purposes (returns 410 Gone).
+        // Use PUT isActive=false (not DELETE) — DELETE hard-deletes the row and returns 404 with no persistence.
         var (tokenId, webhookToken) = await CreateTokenAsync();
 
-        // Deactivate the token
-        await _client.DeleteAsync($"/api/tokens/{tokenId}");
+        await _client.PutAsJsonAsync($"/api/tokens/{tokenId}",
+            new { name = "content-type-test", description = "deactivated", isActive = false });
 
         var formContent = new FormUrlEncodedContent(new[]
         {
@@ -135,7 +136,7 @@ public sealed class WebhookReceiverContentTypeTests(FormConsumingWebAppFactory f
         // Request must still be persisted despite 410
         var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
         var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
-        list.GetProperty("total").GetInt32().Should().BeGreaterThan(0, "inactive token requests must be persisted");
+        list.GetProperty("total").GetInt32().Should().BeGreaterThan(0, "deactivated token requests must be persisted");
     }
 
     [Fact]

@@ -80,7 +80,7 @@ public sealed class WebhookReceiverTests(WebAppFactory factory) : IClassFixture<
         items[0].GetProperty("method").GetString().Should().Be("GET");
     }
     [Fact]
-    public async Task PostToWebhook_WithInactiveToken_Returns410()
+    public async Task PostToWebhook_WithDeletedToken_Returns404()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();
 
@@ -89,22 +89,22 @@ public sealed class WebhookReceiverTests(WebAppFactory factory) : IClassFixture<
         var content = new StringContent("{}", Encoding.UTF8, "application/json");
         var response = await _client.PostAsync($"/webhook/{webhookToken}", content);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Gone);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
-    public async Task PostToWebhook_WithInactiveToken_StillPersistsRequest()
+    public async Task PostToWebhook_WithDeactivatedToken_StillPersistsRequest()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync();
 
-        await _client.DeleteAsync($"/api/tokens/{tokenId}");
+        // Deactivate (PUT isActive=false) preserves the row so audit-trail persistence applies.
+        // DELETE would hard-delete the row, returning 404 with no persistence.
+        await _client.PutAsJsonAsync($"/api/tokens/{tokenId}",
+            new { name = "receiver-test", description = "deactivated", isActive = false });
 
         var content = new StringContent("{\"archived\":true}", Encoding.UTF8, "application/json");
-        await _client.PostAsync($"/webhook/{webhookToken}", content);
-
-        // Reactivate so we can read the requests back via the API
-        await _client.PutAsJsonAsync($"/api/tokens/{tokenId}",
-            new { name = "receiver-test", description = "reactivated", isActive = true });
+        var receiveResponse = await _client.PostAsync($"/webhook/{webhookToken}", content);
+        receiveResponse.StatusCode.Should().Be(HttpStatusCode.Gone);
 
         var listResponse = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
         listResponse.StatusCode.Should().Be(HttpStatusCode.OK);

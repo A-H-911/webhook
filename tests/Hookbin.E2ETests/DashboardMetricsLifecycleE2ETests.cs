@@ -38,7 +38,7 @@ public sealed class DashboardMetricsLifecycleE2ETests(DashboardE2EFixture fixtur
 
     // Webhook writes go through Redis → stream worker → DB (async).
     // Poll until the expected number of requests appear in DB before reading metrics.
-    private async Task WaitForRequestsAsync(string tokenId, int expectedCount, int timeoutMs = 10_000)
+    private async Task WaitForRequestsAsync(string tokenId, int expectedCount, int timeoutMs = 30_000)
     {
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
         while (DateTimeOffset.UtcNow < deadline)

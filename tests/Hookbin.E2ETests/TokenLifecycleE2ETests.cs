@@ -72,10 +72,10 @@ public sealed class TokenLifecycleE2ETests(DashboardE2EFixture fixture)
             var deleteResp = await ApiClient.DeleteAsync($"/api/tokens/{tokenId}");
             Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
 
-            // 7. After deletion (soft-delete; token is deactivated), webhook returns 410 Gone
+            // 7. After deletion (hard-delete; token row is gone via EF cascade), webhook returns 404 Not Found
             var afterDelete = await publicClient.PostAsync($"/webhook/{webhookToken}",
                 new StringContent("{}", Encoding.UTF8, "application/json"));
-            Assert.Equal(HttpStatusCode.Gone, afterDelete.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, afterDelete.StatusCode);
         }
         finally
         {

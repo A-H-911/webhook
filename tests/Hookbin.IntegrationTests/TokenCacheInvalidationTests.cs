@@ -76,7 +76,7 @@ public sealed class TokenCacheInvalidationTests(WebAppFactory factory) : IClassF
     }
 
     [Fact]
-    public async Task DeleteToken_AfterCacheWarmed_NextWebhookReturns410()
+    public async Task DeleteToken_AfterCacheWarmed_NextWebhookReturns404()
     {
         var (tokenId, webhookToken) = await CreateTokenAsync("cache-delete");
 
@@ -85,7 +85,7 @@ public sealed class TokenCacheInvalidationTests(WebAppFactory factory) : IClassF
         await _client.DeleteAsync($"/api/tokens/{tokenId}");
 
         var response = await SendDefaultWebhookAsync(webhookToken);
-        response.StatusCode.Should().Be(HttpStatusCode.Gone, "deleted (inactive) token must immediately return 410, not stale 200");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "hard-deleted token must immediately return 404, not stale 200");
     }
 
     [Fact]

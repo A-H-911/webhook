@@ -95,9 +95,12 @@ public sealed class DashboardMetricsApiTests(WebAppFactory factory) : IClassFixt
         var getToken = await _client.GetAsync($"/api/tokens/{tokenId}");
         getToken.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        // Requests endpoint returns 404 (token no longer exists, no orphan rows)
+        // Requests endpoint returns 200 with total:0 — endpoint does not 404 on missing token;
+        // the cascade-delete guarantee is that the rowcount drops to zero (no orphans).
         var reqsAfter = await _client.GetAsync($"/api/tokens/{tokenId}/requests");
-        reqsAfter.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        reqsAfter.StatusCode.Should().Be(HttpStatusCode.OK);
+        var bodyAfter = await reqsAfter.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        bodyAfter.GetProperty("total").GetInt32().Should().Be(0, "cascade delete must remove all captured requests");
     }
 
     [Fact]
