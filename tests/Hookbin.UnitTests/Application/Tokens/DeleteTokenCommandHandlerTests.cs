@@ -19,26 +19,26 @@ public sealed class DeleteTokenCommandHandlerTests
     [Fact]
     public async Task Handle_ReturnsFalse_WhenTokenNotFound()
     {
-        _repo.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((WebhookToken?)null);
+        _repo.GetByIdIncludingInactiveAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns((WebhookToken?)null);
 
         var result = await CreateHandler().Handle(new DeleteTokenCommand(Guid.NewGuid()), CancellationToken.None);
 
         result.Should().BeFalse();
-        await _repo.DidNotReceive().UpdateAsync(Arg.Any<WebhookToken>(), Arg.Any<CancellationToken>());
+        await _repo.DidNotReceive().DeleteAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task Handle_ReturnsTrue_AndDeactivatesToken()
+    public async Task Handle_ReturnsTrue_AndHardDeletesToken()
     {
         var id = Guid.NewGuid();
         var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
-        _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
+        _repo.GetByIdIncludingInactiveAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         var result = await CreateHandler().Handle(new DeleteTokenCommand(id), CancellationToken.None);
 
         result.Should().BeTrue();
-        token.IsActive.Should().BeFalse();
-        await _repo.Received(1).UpdateAsync(token, Arg.Any<CancellationToken>());
+        await _repo.Received(1).DeleteAsync(id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class DeleteTokenCommandHandlerTests
     {
         var id = Guid.NewGuid();
         var token = new WebhookToken { Id = id, Token = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
-        _repo.GetByIdAsync(id, Arg.Any<CancellationToken>()).Returns(token);
+        _repo.GetByIdIncludingInactiveAsync(id, Arg.Any<CancellationToken>()).Returns(token);
 
         await CreateHandler().Handle(new DeleteTokenCommand(id), CancellationToken.None);
 

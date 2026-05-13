@@ -20,4 +20,5 @@ public interface IWebhookTokenRepository
     Task<DashboardMetrics> GetDashboardMetricsAsync(CancellationToken ct = default);
     Task AddAsync(WebhookToken token, CancellationToken ct = default);
     Task UpdateAsync(WebhookToken token, CancellationToken ct = default);
+    Task DeleteAsync(Guid id, CancellationToken ct = default);
 }

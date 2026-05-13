@@ -268,6 +268,21 @@ describe('DashboardComponent', () => {
     expect(toast.show).toHaveBeenCalledWith('Deleted');
   });
 
+  it('delete refreshes dashboard metrics after confirm', () => {
+    const items = [listItem({ id: 'to-delete' }), listItem({ id: 'keep' })];
+    const { fixture, component, modal, dashboardService } = setup({
+      tokensPage: pageOf(items),
+    });
+    fixture.detectChanges();
+    modal.open.mockReturnValueOnce(makeFakeModalRef<boolean>(true));
+    const event = { stopPropagation: vi.fn() } as unknown as MouseEvent;
+    dashboardService.getMetrics.mockClear();
+
+    component.delete(items[0], event);
+
+    expect(dashboardService.getMetrics).toHaveBeenCalledTimes(1);
+  });
+
   it('copyUrl writes the URL to the clipboard and toasts', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {

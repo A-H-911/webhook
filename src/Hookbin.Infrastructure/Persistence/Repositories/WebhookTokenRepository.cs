@@ -51,6 +51,14 @@ internal sealed class WebhookTokenRepository : IWebhookTokenRepository
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var tracked = await _db.WebhookTokens.FindAsync([id], ct);
+        if (tracked is null) return;
+        _db.WebhookTokens.Remove(tracked);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<(IReadOnlyList<TokenPageRow> Items, int Total)> GetPagedWithStatsAsync(
         int skip, int take, CancellationToken ct = default)
     {

@@ -35,17 +35,17 @@
   <div class="metric-tiles">
     <div class="tile">
       <span class="tile-label">TOTAL ENDPOINTS</span>
-      <span class="tile-value">{{ metrics()?.totalEndpoints ?? 0 }}</span>
+      <span class="tile-value" data-testid="total-endpoints-value">{{ metrics()?.totalEndpoints ?? 0 }}</span>
       <span class="tile-delta">+{{ metrics()?.newEndpointsLast7d ?? 0 }} this week</span>
     </div>
     <div class="tile">
       <span class="tile-label">REQUESTS CAPTURED</span>
-      <span class="tile-value">{{ metrics()?.requestsCapturedAllTime ?? 0 }}</span>
+      <span class="tile-value" data-testid="requests-captured-value">{{ metrics()?.requestsCapturedAllTime ?? 0 }}</span>
       <span class="tile-delta">+{{ metrics()?.requestsCapturedLast24h ?? 0 }} in last 24h</span>
     </div>
     <div class="tile">
       <span class="tile-label">LIVE ENDPOINTS</span>
-      <span class="tile-value">{{ metrics()?.liveEndpoints ?? 0 }}</span>
+      <span class="tile-value" data-testid="live-endpoints-value">{{ metrics()?.liveEndpoints ?? 0 }}</span>
       <span class="tile-delta">receiving now</span>
     </div>
   </div>

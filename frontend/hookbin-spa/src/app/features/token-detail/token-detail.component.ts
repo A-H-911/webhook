@@ -8,6 +8,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TokenService } from '../../core/services/token.service';
 import { RequestService } from '../../core/services/request.service';
 import { SseService } from '../../core/services/sse.service';
+import { DashboardService } from '../../core/services/dashboard.service';
 import { BreadcrumbService } from '../../core/services/breadcrumb.service';
 import { Token, SetCustomResponseDto } from '../../core/models/token.model';
 import { RequestSummary } from '../../core/models/request-summary.model';
@@ -36,6 +37,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
   private readonly tokenService = inject(TokenService);
   private readonly requestService = inject(RequestService);
   private readonly sseService = inject(SseService);
+  private readonly dashboardService = inject(DashboardService);
   private readonly modal = inject(ModalService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -316,6 +318,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
           this.requests.update((list) => list.filter((r) => r.id !== req.id));
           this.total.update((n) => n - 1);
           if (this.selectedDetail()?.id === req.id) this.selectedDetail.set(null);
+          this.dashboardService.getMetrics().subscribe();
         });
       });
   }
@@ -341,6 +344,7 @@ export class TokenDetailComponent implements OnInit, OnDestroy {
           this.requests.set([]);
           this.total.set(0);
           this.selectedDetail.set(null);
+          this.dashboardService.getMetrics().subscribe();
           this.toast.show('All requests cleared');
         });
       });

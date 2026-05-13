@@ -7,6 +7,7 @@ import { of, Observable, EMPTY, Subject, throwError } from 'rxjs';
 import { Router } from '@angular/router';
 import { ModalService } from '../../shared/modal/modal.service';
 import { ToastService } from '../../shared/toast/toast.service';
+import { DashboardService } from '../../core/services/dashboard.service';
 import { SseEvent } from '../../core/services/sse.service';
 
 import { TokenDetailComponent } from './token-detail.component';
@@ -89,6 +90,7 @@ function setup(
     exportRequest: vi.fn(),
   };
   const sseService = { connect: vi.fn().mockReturnValue(sseEvents$) };
+  const dashboardService = { getMetrics: vi.fn().mockReturnValue(of(null)) };
   const modal = {
     open: vi.fn().mockReturnValue({ afterClosed: () => dialogAfterClosed }),
   };
@@ -103,6 +105,7 @@ function setup(
       { provide: TokenService, useValue: tokenService },
       { provide: RequestService, useValue: requestService },
       { provide: SseService, useValue: sseService },
+      { provide: DashboardService, useValue: dashboardService },
       { provide: ModalService, useValue: modal },
       { provide: ToastService, useValue: toast },
       {
@@ -124,6 +127,7 @@ function setup(
     component,
     requestService,
     tokenService,
+    dashboardService,
     dialog: modal,
     snackBar: toast,
     router,
@@ -476,6 +480,29 @@ describe('TokenDetailComponent — dialog actions', () => {
     expect(requestService.clearRequests).toHaveBeenCalledWith('tok-1');
     expect(component.requests()).toEqual([]);
     expect(component.total()).toBe(0);
+  });
+
+  it('deleteRequest refreshes dashboard metrics after confirm', () => {
+    const { component, dashboardService } = setup(of(true));
+    component.requests.set([makeSummary({ id: 'req-1' })]);
+    component.total.set(1);
+    const event = { stopPropagation: vi.fn() } as unknown as MouseEvent;
+    dashboardService.getMetrics.mockClear();
+
+    component.deleteRequest(makeSummary({ id: 'req-1' }), event);
+
+    expect(dashboardService.getMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('clearAll refreshes dashboard metrics after confirm', () => {
+    const { component, dashboardService } = setup(of(true));
+    component.requests.set([makeSummary()]);
+    component.total.set(1);
+    dashboardService.getMetrics.mockClear();
+
+    component.clearAll();
+
+    expect(dashboardService.getMetrics).toHaveBeenCalledTimes(1);
   });
 
   it('exportSelected calls exportRequest for selectedDetail', () => {

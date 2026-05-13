@@ -13,12 +13,12 @@ internal sealed class DeleteTokenCommandHandler(
 {
     public async Task<bool> Handle(DeleteTokenCommand request, CancellationToken cancellationToken)
     {
-        var token = await repository.GetByIdAsync(request.Id, cancellationToken);
+        // GetByIdIncludingInactiveAsync so previously soft-deleted tokens can also be cleaned up
+        var token = await repository.GetByIdIncludingInactiveAsync(request.Id, cancellationToken);
         if (token is null)
             return false;
 
-        token.Deactivate();
-        await repository.UpdateAsync(token, cancellationToken);
+        await repository.DeleteAsync(token.Id, cancellationToken);
         await tokenCache.RemoveAsync(token.Token, cancellationToken);
         sseNotifier.NotifyTokenDeleted(token.Id);
         return true;
