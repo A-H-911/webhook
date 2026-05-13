@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -141,6 +143,16 @@ internal sealed class RedisStreamConsumerService(
 
             await AckAsync(entry.Id);
         }
+        catch (DbUpdateException ex) when (IsForeignKeyViolation(ex))
+        {
+            // Token was hard-deleted between webhook receipt and stream consumption.
+            // The hard-delete contract guarantees no orphan WebhookRequest rows, so the
+            // correct action is to ACK and drop — retrying will never succeed.
+            logger.LogWarning(
+                "Stream entry {Id} references a deleted token; dropping (hard-delete cascade)",
+                entry.Id);
+            await AckAsync(entry.Id);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Leave the entry unACKed so it re-enters the PEL and is recovered on next startup.
@@ -148,6 +160,11 @@ internal sealed class RedisStreamConsumerService(
                 "Failed to process stream entry {Id}; will retry on next startup", entry.Id);
         }
     }
+
+    // SQL Server error 547: foreign key, check, or unique constraint violation.
+    // For this stream the only FK is WebhookRequest.TokenId → WebhookToken.Id.
+    private static bool IsForeignKeyViolation(DbUpdateException ex) =>
+        ex.InnerException is SqlException sql && sql.Number == 547;
 
     private async Task PersistAsync(WebhookRequest request, CancellationToken ct)
     {
