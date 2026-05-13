@@ -238,9 +238,24 @@ public sealed class DashboardE2ETests(DashboardE2EFixture fixture)
     {
         var (tokenId, webhookUrl) = await CreateTokenViaApiAsync("incoming-request-test");
 
-        // Send webhook before navigating so it is already in DB when page loads
+        // Send webhook before navigating. POST returns as soon as the API publishes to Redis;
+        // the StreamWorker persists asynchronously, so we must poll the API until the row lands
+        // in the DB before opening the detail page. Without this, slow CI hosts race the 10 s
+        // selector wait inside the page render.
         var content = new StringContent("{\"event\":\"e2e\"}", Encoding.UTF8, "application/json");
         await ApiClient.PostAsync(new Uri(webhookUrl).PathAndQuery, content);
+
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var resp = await ApiClient.GetAsync($"/api/tokens/{tokenId}/requests");
+            if (resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+                if (body.GetProperty("total").GetInt32() >= 1) break;
+            }
+            await Task.Delay(300);
+        }
 
         var page = await NewPageAsync();
         try
