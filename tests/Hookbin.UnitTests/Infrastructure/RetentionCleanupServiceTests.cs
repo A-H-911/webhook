@@ -37,22 +37,24 @@ public sealed class RetentionCleanupServiceTests
     {
         // Arrange
         var repo = Substitute.For<IWebhookRequestRepository>();
-        repo.DeleteOlderThanAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        // Use a TCS so we don't rely on wall-clock timing. BackgroundService schedules
+        // ExecuteAsync on a thread pool thread; we must wait for the actual call rather
+        // than assuming it runs before StopAsync is reached.
+        var tcs = new TaskCompletionSource<DateTimeOffset>(TaskCreationOptions.RunContinuationsAsynchronously);
+        repo.DeleteOlderThanAsync(
+                Arg.Do<DateTimeOffset>(d => tcs.TrySetResult(d)),
+                Arg.Any<CancellationToken>())
             .Returns(3);
         var logger = Substitute.For<ILogger<RetentionCleanupService>>();
         var service = new RetentionCleanupService(MakeScopeFactory(repo), MakeOptions(7), logger);
 
-        using var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        var cutoff = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await service.StopAsync(CancellationToken.None);
 
-        // Act — start triggers an immediate RunCleanupAsync before the 24-h timer
-        await service.StartAsync(cts.Token);
-        await Task.Delay(250);
-
-        // Assert — repository was called at least once with a cutoff in the past
-        await repo.Received().DeleteOlderThanAsync(
-            Arg.Is<DateTimeOffset>(d => d < DateTimeOffset.UtcNow),
-            Arg.Any<CancellationToken>());
+        // Assert — repository was called with a cutoff in the past
+        cutoff.Should().BeBefore(DateTimeOffset.UtcNow);
     }
 
     [Fact]

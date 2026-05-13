@@ -90,9 +90,12 @@ describe('SseService', () => {
 
   it('emits disconnected event on onerror', () => {
     const events: SseEvent[] = [];
-    service.connect('tok-1').subscribe((e) => events.push(e));
+    const sub = service.connect('tok-1').subscribe((e) => events.push(e));
     MockEventSource.lastInstance?.simulateError();
     expect(events).toContainEqual({ eventType: 'disconnected' });
+    // Unsubscribe to clear the pending 1000 ms reconnect setTimeout. Without this the real
+    // timer fires during a later test file and throws "EventSource is not defined" in jsdom.
+    sub.unsubscribe();
   });
 
   it('calls close on EventSource when subscription is unsubscribed', () => {
