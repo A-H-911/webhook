@@ -36,6 +36,24 @@ public sealed class DashboardMetricsLifecycleE2ETests(DashboardE2EFixture fixtur
         (await ApiClient.PostAsync(path, content)).EnsureSuccessStatusCode();
     }
 
+    // Webhook writes go through Redis → stream worker → DB (async).
+    // Poll until the expected number of requests appear in DB before reading metrics.
+    private async Task WaitForRequestsAsync(string tokenId, int expectedCount, int timeoutMs = 10_000)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var resp = await ApiClient.GetAsync($"/api/tokens/{tokenId}/requests");
+            if (resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+                if (body.GetProperty("total").GetInt32() >= expectedCount) return;
+            }
+            await Task.Delay(300);
+        }
+        throw new TimeoutException($"Timed out waiting for {expectedCount} requests to appear for token {tokenId}");
+    }
+
     [Fact]
     public async Task DeleteWebhookWithRequests_UpdatesStatTilesAfterReload()
     {
@@ -45,12 +63,14 @@ public sealed class DashboardMetricsLifecycleE2ETests(DashboardE2EFixture fixtur
         await PostWebhookAsync(webhookToken);
         await PostWebhookAsync(webhookToken);
 
+        // Wait for the stream worker to commit both requests to DB before reading metrics
+        await WaitForRequestsAsync(tokenId, 2);
+
         var page = await NewPageAsync();
         try
         {
-            await page.GotoAsync($"{BaseUrl}/dashboard");
-
-            // Wait for the tiles to render; capture REQUESTS CAPTURED and TOTAL ENDPOINTS before delete
+            // NetworkIdle ensures the Angular metrics forkJoin has resolved before we read tile values
+            await page.GotoAsync($"{BaseUrl}/dashboard", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             await page.WaitForSelectorAsync("[data-testid='requests-captured-value']");
             var capturedBefore = int.Parse(
                 (await page.InnerTextAsync("[data-testid='requests-captured-value']")).Trim());
@@ -58,10 +78,10 @@ public sealed class DashboardMetricsLifecycleE2ETests(DashboardE2EFixture fixtur
                 (await page.InnerTextAsync("[data-testid='total-endpoints-value']")).Trim());
 
             // Hard-delete via API
-            await ApiClient.DeleteAsync($"/api/tokens/{tokenId}");
+            (await ApiClient.DeleteAsync($"/api/tokens/{tokenId}")).EnsureSuccessStatusCode();
 
-            // Reload the dashboard — triggers a fresh metrics fetch
-            await page.GotoAsync($"{BaseUrl}/dashboard");
+            // Reload and wait for the fresh metrics fetch to complete
+            await page.GotoAsync($"{BaseUrl}/dashboard", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             await page.WaitForSelectorAsync("[data-testid='requests-captured-value']");
 
             var capturedAfter = int.Parse(
@@ -85,28 +105,31 @@ public sealed class DashboardMetricsLifecycleE2ETests(DashboardE2EFixture fixtur
         var (tokenId, webhookToken) = await CreateTokenAsync("metrics-refresh-e2e");
         await PostWebhookAsync(webhookToken);
 
+        // Wait for the stream worker to commit the request to DB
+        await WaitForRequestsAsync(tokenId, 1);
+
         var page = await NewPageAsync();
         try
         {
-            // Navigate to dashboard and read baseline values
-            await page.GotoAsync($"{BaseUrl}/dashboard");
+            // Navigate to dashboard; NetworkIdle ensures metrics forkJoin has resolved
+            await page.GotoAsync($"{BaseUrl}/dashboard", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             await page.WaitForSelectorAsync("[data-testid='requests-captured-value']");
             var capturedBefore = int.Parse(
                 (await page.InnerTextAsync("[data-testid='requests-captured-value']")).Trim());
 
             // Hard-delete via API
-            await ApiClient.DeleteAsync($"/api/tokens/{tokenId}");
+            (await ApiClient.DeleteAsync($"/api/tokens/{tokenId}")).EnsureSuccessStatusCode();
 
             // Click the Refresh button (tests that the in-page refresh path also works correctly)
             var refreshBtn = page.GetByRole(AriaRole.Button, new() { Name = "Refresh" });
             await refreshBtn.WaitForAsync();
-            await refreshBtn.ClickAsync();
 
-            // Wait for the metrics to update (the refresh is async; allow up to 5 s)
-            await page.WaitForFunctionAsync(
-                $"() => parseInt(document.querySelector('[data-testid=\"requests-captured-value\"]')?.innerText ?? '0') <= {capturedBefore - 1}",
-                null,
-                new PageWaitForFunctionOptions { Timeout = 5_000 });
+            // Wait for the metrics API response that the Refresh button triggers, then click
+            var metricsResponseTask = page.WaitForResponseAsync(
+                r => r.Url.Contains("/api/dashboard/metrics"),
+                new PageWaitForResponseOptions { Timeout = 5_000 });
+            await refreshBtn.ClickAsync();
+            await metricsResponseTask;
 
             var capturedAfter = int.Parse(
                 (await page.InnerTextAsync("[data-testid='requests-captured-value']")).Trim());
