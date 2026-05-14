@@ -351,6 +351,19 @@ jobs:
         with:
           name: dotnet-build-output
 
+      # actions/upload-artifact@v4 does not preserve POSIX executable bits.
+      # After download every file is mode 644 — which breaks any binary that
+      # the OS needs to launch directly: the .NET apphost launcher used by
+      # `dotnet run` (for RotatePassword in the next step) and Playwright's
+      # chromium driver under .playwright/. `dotnet test` is unaffected
+      # because vstest never spawns an apphost. chmod -R +x on bin/Release
+      # is overbroad but harmless — the OS only honors +x on files that
+      # something tries to launch.
+      - name: Restore executable bits on downloaded binaries
+        run: |
+          find . -path '*/bin/Release' -type d -exec chmod -R +x {} + 2>/dev/null || true
+          find . -path '*/.playwright' -type d -exec chmod -R +x {} + 2>/dev/null || true
+
       # Buildx is the modern docker builder; `install: true` makes it the
       # default backend for `docker build` / `docker compose build`, which is
       # required for the GHA layer cache below.
