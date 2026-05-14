@@ -308,7 +308,7 @@ User configures response in dialog
              body: "{\"ok\":true}", headers: "{\"X-Custom\":\"value\"}" }
   → SetCustomResponseCommand handler:
       UPDATE WebhookTokens SET CustomResponse...
-      _memoryCache.Remove($"token:{token.Token}")  ← explicit cache invalidation
+      tokenCache.RemoveAsync(token.Token)  ← Redis DEL wh:token:{guid} (fail-open)
   → Next incoming request uses new response immediately (cache miss forces DB read)
 ```
 
@@ -317,10 +317,11 @@ User configures response in dialog
 ```
 User deletes token
   → DeleteTokenCommand handler:
-      soft-delete token (IsActive=false)
-      hard-delete all requests for this token
-      _memoryCache.Remove(tokenCacheKey)
-      _sseNotifier.NotifyTokenDeleted(tokenId)
+      hard-delete token row (DELETE WebhookTokens WHERE Id = @id)
+      EF Core cascade hard-deletes child WebhookRequest rows in the same transaction
+      tokenCache.RemoveAsync(token.Token)
+      sseNotifier.NotifyTokenDeleted(tokenId)
+      (Distinct from the deactivate path — UpdateToken { isActive: false } — which preserves the audit trail.)
   → SseNotifier: writes "event: token-deleted\ndata: {}\n\n" to each channel
                  then calls Channel.Writer.Complete() on each
   → SPA EventSource receives "token-deleted" event → router.navigate(['/'])
@@ -354,7 +355,7 @@ RetentionCleanupService (in Hookbin.JobsWorker process — NOT the API)
 | `Token` | `Guid` | Unique indexed — public URL segment |
 | `Description` | `string?` | Max 200 chars |
 | `CreatedAt` | `DateTimeOffset` | UTC |
-| `IsActive` | `bool` | Soft-delete flag |
+| `IsActive` | `bool` | Pause flag — `false` = deactivated (paused). The delete path is hard-delete + EF cascade; deactivate is the distinct audit-preserving pause path. |
 | `CustomResponse` | `CustomResponse?` | EF Core owned entity; nullable |
 
 **CustomResponse** (owned value object, columns in `WebhookTokens` table)
@@ -387,6 +388,8 @@ RetentionCleanupService (in Hookbin.JobsWorker process — NOT the API)
 | `SizeBytes` | `long` | |
 | `ProcessingTimeMs` | `long?` | Stream-worker persist latency in ms; `null` until the entry is processed |
 | `Note` | `string?` | User-editable annotation; max 2,000 chars; set via `PATCH .../note` |
+| `IpCountry` | `string?` | ISO 3166-1 alpha-2 country code (e.g., `US`, `DE`). Enriched from `IpAddress` via MaxMind GeoLite2 (`IGeoIpService.GetCountry`) inside `WebhookController.Receive` (line 37) on the receiver hot path, **before** the request is XADDed to the Redis stream. `null` when the lookup fails or the IP is private. |
+| `ResponseStatusCode` | `int?` | The HTTP status the receiver actually returned (custom response status, or `200` default); enables per-request observability |
 
 **Indexes:** `WebhookToken.Token` (unique), `WebhookRequest.TokenId` (non-clustered), `WebhookRequest.ReceivedAt` (non-clustered), `WebhookRequest.TokenId + ReceivedAt + Id` (covering — eliminates key lookup for paginated list query).
 
@@ -428,7 +431,7 @@ RetentionCleanupService (in Hookbin.JobsWorker process — NOT the API)
 | `GET` | `/api/tokens/{id}` | — | `200 WebhookTokenDto` / `404` | |
 | `POST` | `/api/tokens` | `{ description?: string }` | `201 WebhookTokenDto` | `webhookUrl` uses `HOOKBIN_BASE_URL` |
 | `PUT` | `/api/tokens/{id}` | `{ description?: string, isActive: bool }` | `200 WebhookTokenDto` / `404` | Update description or reactivate |
-| `DELETE` | `/api/tokens/{id}` | — | `204` / `404` | Soft-delete + hard-delete all requests |
+| `DELETE` | `/api/tokens/{id}` | — | `204` / `404` | Hard-delete token + EF cascade hard-deletes child requests |
 | `PUT` | `/api/tokens/{id}/custom-response` | `{ statusCode, contentType, body?, headers }` | `204` / `404` | `headers` is a raw JSON string |
 | `DELETE` | `/api/tokens/{id}/custom-response` | — | `204` / `404` | Resets to 200 OK defaults |
 
@@ -497,29 +500,69 @@ All responses are guarded by `context.Response.HasStarted` check — essential f
 ### 7.4 SSE Architecture
 
 ```
-SseNotifier (singleton)
-  ConcurrentDictionary<tokenId, ConcurrentDictionary<channelId, Channel<SseEvent>>>
+SseNotifier (singleton; src/Hookbin.Infrastructure/Sse/SseNotifier.cs)
+  ConcurrentDictionary<Guid tokenId, List<Channel<SseEvent>>>   ← single-level dict
+  Lock _lock                                                    ← single global lock for dict mutations
+  Redis counter wh:sse-count:{tokenId} (TTL 7200 s)             ← cross-instance connection cap
   │
-  ├── SubscribeAsync(tokenId, ct):
-  │     lock(perTokenLock): if count >= 10 → throw TooManyConnectionsException → 429
-  │     channelId = Guid.NewGuid()
-  │     create bounded Channel<SseEvent>(capacity: 50)
-  │     add to inner dict
-  │     yield return each event from channel reader
-  │     on cancellation → remove channel from dict
+  ├── TrySubscribeAsync(tokenId, ct):   ← called BEFORE SubscribeAsync by the controller
+  │     EVAL Lua: INCR counter; if > 10 → DECR + return 0; else EXPIRE 7200 → return count
+  │     return true on success / false on limit reached
+  │     fail-open: Redis outage → return true (do not refuse subscriptions)
+  │     SseController turns false into 429.
   │
-  ├── NotifyAsync(tokenId, dto):
-  │     foreach channel in tokenId's inner dict
-  │       channel.Writer.TryWrite(...)  ← O(1), non-blocking
-  │       silently drops if buffer full (request is already persisted in DB)
+  ├── SubscribeAsync(tokenId, ct):  → IAsyncEnumerable<SseEvent>
+  │     channel = Channel.CreateBounded<SseEvent>(
+  │       new BoundedChannelOptions(100) {            ← capacity 100, NOT 50
+  │         FullMode = BoundedChannelFullMode.DropOldest,
+  │         SingleReader = true, SingleWriter = false })
+  │     lock(_lock): _subscribers.GetOrAdd(tokenId, _ => []).Add(channel)
+  │     yield each event from channel.Reader.ReadAllAsync(ct)
+  │     finally: lock(_lock) → remove channel from list; remove tokenId key if list empty
   │
-  └── NotifyTokenDeleted(tokenId):
-        write SseEvent("token-deleted", "{}") to each channel
-        Channel.Writer.Complete() on each
-        remove tokenId from outer dict
+  ├── NotifyAsync(tokenId, summaryJson, ct):  → Task
+  │     evt = new SseEvent("request", summaryJson)
+  │     lock(_lock): snapshot the list of channels for this tokenId
+  │     foreach channel: channel.Writer.TryWrite(evt)   ← O(1), non-blocking
+  │     DropOldest mode means TryWrite never throws ChannelClosedException
+  │     even if NotifyTokenDeleted completes the channel mid-loop.
+  │
+  ├── UnsubscribeAsync(tokenId, ct):  → Task
+  │     DECR wh:sse-count:{tokenId}  (called when the SSE connection ends)
+  │
+  ├── RefreshSubscriptionAsync(tokenId, ct):  → Task
+  │     EXPIRE wh:sse-count:{tokenId} 7200       ← re-arm TTL during a long-lived stream
+  │
+  └── NotifyTokenDeleted(tokenId):   → void (sync — controller doesn't await)
+        lock(_lock): snapshot list AND remove tokenId from dict
+        foreach channel: TryWrite SseEvent("token-deleted", "{}") then TryComplete()
 ```
 
+**Connection cap is cross-instance.** The 10-per-token cap is enforced by the Redis Lua script in `TrySubscribeAsync`, not by an in-process lock. Two API instances cannot exceed 10 combined connections for a token. The `Lock _lock` field is only used to keep the in-process `_subscribers` dictionary consistent during mutations — it does not enforce any limit.
+
+**Channel buffer:** capacity 100 with `BoundedChannelFullMode.DropOldest` (bursty publishers won't block; old events are evicted in favour of new ones).
+
 `NullSseNotifier` (no-op) is available for test substitution.
+
+**Two-stage cross-instance fan-out (Redis Pub/Sub bridge)**
+
+`SseNotifier` is per-process — its `ConcurrentDictionary` only sees the subscribers that connected to *this* API instance. To make events from the StreamWorker (or from any API instance) visible to every subscriber across the cluster, the system uses Redis Pub/Sub as a bridge.
+
+```
+StreamWorker (after persisting WebhookRequest to SQL)
+  → PUBLISH sse:{tokenId}  {summaryDtoJson}     (Redis Pub/Sub channel)
+
+Each API instance runs RedisSseBridgeService (BackgroundService):
+  SUBSCRIBE sse:*  (pattern subscription)
+  on message:
+    parse tokenId from channel name
+    sseNotifier.NotifyAsync(tokenId, summaryDto)   ← writes to in-process channels
+```
+
+**Why this lives in the API process, not the StreamWorker:** the in-process `Channel<SseEvent>` instances only exist where SSE HTTP connections are held — that's the API. Moving the bridge to the StreamWorker would make fan-out a no-op for every browser tab. See CLAUDE.md DANGER ZONE.
+
+**Concurrent connection limit (cross-instance):** the 10-per-token cap is enforced in `SseNotifier.TrySubscribeAsync` (`src/Hookbin.Infrastructure/Sse/SseNotifier.cs:32-48`) using an atomic Redis Lua script that runs `INCR` + limit check + `EXPIRE` in one round-trip. The counter key is `wh:sse-count:{tokenId}`. Returns `true` on success and `false` when the limit is reached (the controller turns the `false` into `429`). `UnsubscribeAsync` decrements the counter when the connection closes; `RefreshSubscriptionAsync` re-arms the 7200-second TTL so a crashed API instance can't permanently hold a slot. The counter call itself is **fail-open** — a Redis outage allows the subscription to proceed rather than refusing every new connection.
+
 
 ### 7.5 Application Layer — CQRS Map
 
@@ -529,7 +572,7 @@ SseNotifier (singleton)
 |---------|--------|-------|
 | `CreateTokenCommand` | INSERT WebhookToken | — |
 | `UpdateTokenCommand` | UPDATE description / IsActive | — |
-| `DeleteTokenCommand` | Soft-delete + hard-delete requests + `NotifyTokenDeleted` | `Remove()` |
+| `DeleteTokenCommand` | Hard-delete token + EF cascade hard-deletes child requests + `NotifyTokenDeleted` | `RemoveAsync()` |
 | `SetCustomResponseCommand` | UPDATE CustomResponse columns | `Remove()` |
 | `ResetCustomResponseCommand` | Clear CustomResponse columns | `Remove()` |
 
@@ -576,17 +619,35 @@ Validated at startup via `IValidateOptions<WebhookOptions>` with `.ValidateOnSta
 
 ### 7.7 Token Cache Strategy
 
-- `IMemoryCache` key `"token:{guid}"` with 5-minute sliding expiration
-- Used by **both** active and inactive tokens (via `GetByTokenIncludingInactiveAsync`)
-  - Receiver path needs quick inactive lookup to return 410 Gone without DB hit
-  - Cache entry persists for token's full lifetime (active or inactive)
-  - Only invalidated on mutation (not on IsActive status change)
-- **Null tokens are never cached** — cache key explicitly removed when token not found
-- All mutations call `_memoryCache.Remove($"token:{token.Token}")`:
-  - `SetCustomResponseCommand`
-  - `ResetCustomResponseCommand`
-  - `DeleteTokenCommand`
-  - `UpdateTokenCommand` (when IsActive toggled)
+The token cache is **Redis-backed** behind the `ITokenCache` port in the Application layer (`src/Hookbin.Application/Caching/ITokenCache.cs`). The concrete implementation is `RedisTokenCache` (`src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs`).
+
+| Aspect | Value |
+|--------|-------|
+| Port | `ITokenCache` (Application) |
+| Implementation | `RedisTokenCache` (Infrastructure) |
+| Key | `wh:token:{guid}` |
+| Serialization | `JsonSerializer.Serialize/Deserialize<WebhookToken>` |
+| TTL | 5 minutes, **sliding** — `KeyExpireAsync` extends TTL on every cache hit |
+| Failure mode | **Fail-open** — `RedisException` / `RedisTimeoutException` are caught and logged; handlers fall back to the database |
+
+**Hot-path behaviour:**
+
+- Receiver path uses the cache for **both** active and inactive tokens (via `GetByTokenIncludingInactiveAsync`) so a 410 Gone for an inactive token doesn't cost a DB round-trip.
+- **Null lookups are never cached.** When a token isn't found, the cache key is left empty (or removed) so a later create doesn't see a stale negative entry.
+- Per-token rate limiter (250 req/sec default) sits in front of the cache lookup — see §11 Security.
+
+**Invalidation:**
+
+All four mutation handlers call `tokenCache.RemoveAsync(token.Token, ct)` after mutating:
+
+- `SetCustomResponseCommand` — `src/Hookbin.Application/Tokens/Commands/SetCustomResponse/SetCustomResponseCommandHandler.cs:28`
+- `ResetCustomResponseCommand` — `…/ResetCustomResponse/ResetCustomResponseCommandHandler.cs:20`
+- `UpdateTokenCommand` — `…/UpdateToken/UpdateTokenCommandHandler.cs:30`
+- `DeleteTokenCommand` — `…/DeleteToken/DeleteTokenCommandHandler.cs:22`
+
+Skipping the `RemoveAsync` call on a new mutation handler is the danger-zone invariant: the cache will serve a stale custom response or active-state for up to 5 minutes. `CLAUDE.md` documents this as a DANGER ZONE row.
+
+**Cross-instance consistency:** because the cache is Redis-backed, all API instances share the same key space. Invalidation in one instance is visible to the others on the next read.
 
 ---
 
@@ -612,11 +673,11 @@ Hookbin.sln
 │   │
 │   ├── Hookbin.Application/
 │   │   ├── Caching/
-│   │   │   └── ITokenCache.cs                  ← IMemoryCache abstraction (5-min sliding)
+│   │   │   └── ITokenCache.cs                  ← Cache port (Redis-backed, 5-min sliding TTL)
 │   │   ├── Tokens/Commands/
 │   │   │   ├── CreateToken/
 │   │   │   ├── UpdateToken/                    ← description + isActive + ITokenCache.Remove
-│   │   │   ├── DeleteToken/                    ← soft-delete + hard-delete + ITokenCache.Remove + SSE notify
+│   │   │   ├── DeleteToken/                    ← hard-delete + EF cascade + ITokenCache.Remove + SSE notify
 │   │   │   ├── SetCustomResponse/              ← UPDATE + ITokenCache.Remove
 │   │   │   └── ResetCustomResponse/            ← clear + ITokenCache.Remove
 │   │   ├── Tokens/Queries/
@@ -657,7 +718,7 @@ Hookbin.sln
 │   │   │   └── RetentionCleanupService.cs      ← IServiceScopeFactory; try/catch; PeriodicTimer(24h) — runs in JobsWorker
 │   │   ├── Redis/
 │   │   │   ├── RedisStreamPublisher.cs         ← IRequestQueuePublisher impl; XADD webhook-requests
-│   │   │   ├── RedisTokenCache.cs              ← ITokenCache impl; IMemoryCache 5-min sliding
+│   │   │   ├── RedisTokenCache.cs              ← ITokenCache impl; Redis-backed, 5-min sliding TTL, fail-open
 │   │   │   ├── RedisStreamConsumerService.cs   ← XREADGROUP; PEL recovery "0-0"; XACK; PUBLISH sse:{id}
 │   │   │   └── RedisSseBridgeService.cs        ← SUBSCRIBE sse:*; writes to SseNotifier; stays in API
 │   │   ├── Sse/
@@ -911,9 +972,31 @@ Captured request data is persisted **unredacted** — this includes full headers
 
 ### Additional Security Controls
 
-- **CSRF protection:** Anti-forgery token via `X-XSRF-TOKEN` header. Angular's `HttpClient` reads the `XSRF-TOKEN` cookie and echoes the header automatically on state-changing requests.
-- **Session revocation:** Logout invalidates the session server-side immediately via an in-memory revocation store. A server restart clears the revocation set (acceptable for single-admin use; re-login is required).
-- **Rate limiting:** The webhook receiver is rate-limited per token; the login endpoint is rate-limited per real client IP (requires `X-Forwarded-For` from nginx).
+**CSRF protection (antiforgery)**
+
+ASP.NET Core antiforgery is registered with `o.HeaderName = "X-XSRF-TOKEN"` (`src/Hookbin.API/Program.cs:131`). The middleware pipeline emits an `XSRF-TOKEN` cookie on every authenticated request (`Program.cs:199-209`). Angular's `HttpClient` reads that cookie automatically and echoes the value back in the `X-XSRF-TOKEN` header on state-changing requests; the antiforgery middleware validates the match. Mismatched or missing token → 400.
+
+**Session revocation (cross-instance logout)**
+
+Logout calls `ISessionRevocationStore.RevokeAsync(sessionId)`. The interface lives in the API project (`src/Hookbin.API/Services/ISessionRevocationStore.cs`); the implementation is `RedisSessionRevocationStore` (`src/Hookbin.API/Services/RedisSessionRevocationStore.cs`):
+
+- Key `wh:revoked-session:{sessionId}`. TTL is derived inside the store from `AuthOptions.SessionHours` (`SessionHours * 3600` seconds) so the revocation marker always outlives the cookie's sliding window — callers do not pass an explicit TTL.
+- Cookie `OnValidatePrincipal` (`Program.cs:76-86`) reads the store on every authenticated request via `KeyExistsAsync`; revoked sessions are rejected and the principal renewal is blocked.
+- **Fail-open** on Redis outage — `IsRevokedAsync` catches `RedisException`/`RedisTimeoutException` and returns `false` so a Redis incident doesn't lock the admin out. Same trust model as the token cache; see §16.
+- Cross-instance by construction: revoking on one API instance is visible to every instance on the next read.
+
+**Rate limiting**
+
+Two policies wired in `Program.cs:98-124` and consumed via `[EnableRateLimiting("<name>")]` on the relevant endpoints:
+
+| Policy | Type | Default | Partition | Applied to | Rationale |
+|--------|------|---------|-----------|------------|-----------|
+| `"webhook-receiver"` | Token-bucket | `WEBHOOK__ReceiverRateLimitPerSecond` (default 250 req/sec) | Route value `token` (the `{token:guid}` segment) | `[EnableRateLimiting("webhook-receiver")]` on `WebhookController.Receive` | One noisy producer cannot starve the persistence pipeline for unrelated tokens. |
+| `"login"` | Fixed window — **global, no partition** | 5 requests / 1 minute | None (single bucket for the endpoint) | `[EnableRateLimiting("login")]` on `AuthController.Login` | Brute-force on a single admin account is bounded to ≤ 5 attempts/min worldwide. The single-admin trust model accepts that a brute-force attempt may briefly block the legitimate operator — they retry after the window. |
+
+Both respond with `429 Too Many Requests` (set in `opts.RejectionStatusCode`). The login policy applies even on invalid credentials, so a wrong-password attempt counts against the bucket.
+
+Note: this design uses a **global** login bucket on purpose. A per-IP fixed window would let an attacker rotate IPs to defeat the limit; under the single-admin model, the strictness is acceptable.
 - **Security headers:** nginx sets HSTS, CSP, Permissions-Policy, X-Frame-Options: DENY, X-Content-Type-Options: nosniff, and Referrer-Policy on all responses.
 
 ---
@@ -1009,6 +1092,25 @@ dotnet test tests/Hookbin.UnitTests/
 ```
 
 Covers domain entity invariants, CQRS handler logic, SSE notifier behaviour (11th connection throws, `token-deleted` completes channels), and `RetentionCleanupService` (DB errors do not stop the timer).
+
+### Architecture Tests — No Dependencies
+
+```bash
+dotnet test tests/Hookbin.ArchitectureTests/
+# OR via cross-OS scripts:
+#   pwsh scripts/run-arch-tests.ps1
+#   bash scripts/run-arch-tests.sh
+```
+
+Enforced as a separate CI job (`.github/workflows/ci.yml` job `architecture-test`) using **ArchUnitNET + NetArchTest**. The rules catch design drift at build time rather than review time. Categories:
+
+- **Layer dependency rules** — Domain references nothing; Application references only Domain; Infrastructure references Application; API references both.
+- **CQRS naming/structure** — Commands are `sealed record`; handlers are `internal sealed`; validators inherit `AbstractValidator<T>`; folder name matches namespace.
+- **Entity encapsulation** — Domain entities have no public setters (init-only or private set with `[JsonInclude]`).
+- **Repository/controller conventions** — Repository methods return `Task`, controllers wire MediatR, etc.
+- **Zero-trust invariants** — security-sensitive rules (auth attribute placement, etc.).
+
+Failing an architecture test is a fast-feedback signal that a convention is being broken. If you intentionally need to break one, update the test in the same PR.
 
 ### Integration Tests — Requires Docker
 
@@ -1154,19 +1256,27 @@ Review the generated migration before committing. Destructive changes (column dr
 | 7 | Search | `LIKE '%term%'` on headers + body; max `pageSize=100` |
 | 8 | Request size limit | Configurable via `MAX_REQUEST_SIZE_MB`; enforced in Kestrel |
 | 9 | Export | JSON per-request download |
-| 10 | Background jobs | No Hangfire — `BackgroundService` + `PeriodicTimer(24h)` |
-| 11 | SSE notify | Direct in-process call; best-effort; wrapped in try/catch |
+| 10 | Background jobs | No Hangfire — `RetentionCleanupService` lives in `Hookbin.JobsWorker` as `BackgroundService` + `PeriodicTimer(24h)`; single replica only (no leader election) |
+| 11 | SSE notify | Direct in-process `TryWrite` to bounded channel (O(1), best-effort, try/catch). Cross-instance fan-out via `RedisSseBridgeService` Pub/Sub bridge — see decision #26 and §7.4 |
 | 12 | Database | Single `WebhookDb` on SQL Server 2022 Developer Edition |
 | 13 | SEQ | Container in docker-compose; ports bound to `127.0.0.1` |
 | 14 | MSSQL init | Custom Docker image with `entrypoint.sh` + `sqlcmd` polling loop |
-| 15 | Scale target | < 100 webhook URLs, small team, single API instance |
+| 15 | Scale target | < 100 webhook URLs, small team. API is horizontally scalable (Redis Pub/Sub SSE bridge + Redis token cache + Redis session revocation make state cross-instance) |
 | 16 | Frontend | Separate Nginx container serving Angular build |
-| 17 | Testing | Unit + Integration (Testcontainers) + E2E (Playwright) |
-| 18 | Redis | Future upgrade for multi-instance SSE; `ISseNotifier` interface unchanged |
+| 17 | Testing | Unit + Architecture (ArchUnit + NetArchTest) + Integration (Testcontainers) + E2E (Playwright) |
+| 18 | Redis as runtime dependency | Redis 7 is a first-class runtime (v7 — see §16.2). Used by `RedisTokenCache` (#23), `RedisSseBridgeService` (#26), `RedisSessionRevocationStore` (#27), `RedisStreamConsumerService` (#24). Cache and session-revocation paths are **fail-open** on Redis outage; streams are fail-loud (ingest stops if Redis is unreachable). |
 | 19 | Binary payloads | Base64-encoded; `IsBodyBase64` flag; ~33% storage overhead |
 | 20 | SSE notify timing | `TryWrite` to bounded Channel — O(1), non-blocking |
 | 21 | IP capture | `UseForwardedHeaders()` in pipeline; Nginx passes `X-Real-IP` + `X-Forwarded-For` |
 | 22 | `WebhookOptions` | Validated at startup via `IValidateOptions`; fail-fast on invalid config |
+| 23 | Three-process architecture | API + `Hookbin.StreamWorker` + `Hookbin.JobsWorker` share Domain/Application/Infrastructure libraries with four focused DI extensions (`AddCoreInfrastructure` plus one of `AddApiInfrastructure` / `AddStreamWorkerInfrastructure` / `AddJobsWorkerInfrastructure`). Rationale: isolates webhook ingest, retention, and HTTP serving so each can scale and fail independently. Only the API runs `MigrateAsync`; workers poll `CanConnectAsync` to wait for the schema. |
+| 24 | Redis Streams for async webhook persistence | `WebhookController` calls `RedisStreamPublisher.PublishAsync` (XADD `webhook-requests`); `RedisStreamConsumerService` in StreamWorker consumes via consumer group `webhook-api` (`XREADGROUP`) and INSERTs into SQL, then PUBLISHes `sse:{tokenId}`. Provides at-least-once durability with PEL recovery via `XREADGROUP "0-0"` on startup. Hard-deleted-token FK violation (`SqlException.Number == 547`) is treated as terminal — XACK + drop with a warning so the entry doesn't poison the pending list. |
+| 25 | Hard-delete on token deletion | `DeleteTokenCommand` calls `repository.DeleteAsync(id)`; EF Core cascade (`OnDelete(DeleteBehavior.Cascade)`) removes all child `WebhookRequest` rows in the same transaction. Rationale: dashboard metrics query `WebhookRequest` rows directly; soft-delete left orphans that permanently inflated `requestsCapturedAllTime` and `liveEndpoints`. The pause path (`UpdateToken { isActive: false }`) is distinct and preserves the audit trail — see CLAUDE.md DANGER ZONE. |
+| 26 | Redis Pub/Sub SSE bridge | `RedisSseBridgeService` (in the API process, **not** the StreamWorker) subscribes to pattern `sse:*` and routes messages into the in-process `SseNotifier`. Keeps every browser tab in sync regardless of which API instance the publisher hit. Must stay in the API process — the in-process `Channel<SseEvent>` instances only exist where SSE HTTP connections are held. |
+| 27 | Session revocation via Redis | `RedisSessionRevocationStore` persists revoked session IDs at key `wh:revoked-session:{sessionId}` with TTL = session lifetime. `OnValidatePrincipal` consults the store on every authenticated request so logout is immediate and cross-instance. Fail-open on Redis outage — Redis being down should not lock the admin out. |
+| 28 | Rate limiting & antiforgery | Two `UseRateLimiter` partitions: per-token webhook receiver (default 250/sec) and per-IP login (5/min). Antiforgery registered with `X-XSRF-TOKEN` header; middleware emits the `XSRF-TOKEN` cookie automatically on authenticated requests. Angular `HttpClient` round-trips the value on state-changing calls. |
+| 29 | Architecture tests as CI gate | `tests/Hookbin.ArchitectureTests/` uses **ArchUnitNET + NetArchTest** to enforce layer dependencies, CQRS naming/structure, entity encapsulation, controller/repository conventions, and zero-trust security invariants. Failing tests block merges via the dedicated `architecture-test` job in `.github/workflows/ci.yml`. Catches design drift at build time, not review time. |
+| 30 | GeoIP enrichment | `WebhookRequest.IpCountry` is populated by `WebhookController.Receive` on the API hot path (`WebhookController.cs:37`) via `IGeoIpService.GetCountry(ipAddress)` (MaxMind GeoLite2). Enrichment happens before the request is XADDed to the Redis stream, so the stored value travels through the stream payload to the StreamWorker. Returns `null` for private IPs and lookup misses. Trade-off: keeps the country tag attached to the captured request even if the StreamWorker is offline, at the cost of a small synchronous lookup on the receiver. |
 
 ### 16.2 Revision History
 
@@ -1178,6 +1288,7 @@ Review the generated migration before committing. Destructive changes (column dr
 | v4 | 2026-05-04 | Second review — IP forwarding, BackgroundService crash guard, NullSseNotifier, body reading, CORS, ports, Host header, SSE race condition, options validation |
 | v5 | 2026-05-04 | Code review — route corrections, IDOR fixes, cache eviction, AsNoTracking, 422 validation, SSE retry frame, nginx updates, Polly retry narrowing |
 | v6 | 2026-05-05 | Browser + SEQ audit — 3 bugs fixed: GlobalExceptionMiddleware SSE disconnect crash, custom response headers type mismatch, HasStarted guard on ValidationException |
+| v7 | 2026-05-14 | Docs alignment audit — three-process architecture (API + StreamWorker + JobsWorker), Redis as first-class runtime (token cache + SSE bridge + session revocation + stream consumer), hard-delete on `DeleteToken` with EF cascade, GeoIP enrichment (`IpCountry`), per-token rate limiting + antiforgery + Redis-backed session revocation, ArchUnitNET CI gate. See `docs/AUDIT/DOCS_REFINEMENT_2026-05-14.md` for the full finding list. |
 
 ### 16.3 All Issues Found & Fixed
 
@@ -1240,12 +1351,15 @@ Review the generated migration before committing. Destructive changes (column dr
 |------------|--------|--------------------|
 | `LIKE` search — full scan per token | Slow for tokens with 10k+ requests | < 100 URLs, small team; FTS upgrade path documented |
 | SSE notify is best-effort — full channel buffer → event dropped | User may miss a live event; refresh restores it | Request is durable in DB |
-| Single API instance — SSE channels are in-process | Horizontal scaling breaks SSE | Redis upgrade path documented; interface unchanged |
+| Per-instance SSE channels are bounded (100 events, DropOldest) | Bursty publishers can drop events on a single instance; the request is still durable in DB | Cross-instance fan-out is handled by `RedisSseBridgeService` (Pub/Sub pattern `sse:*`) — see §16. Each subscriber still holds a single persistent HTTP connection to one API instance. |
 | Binary payloads Base64-encoded — ~33% storage overhead | Larger DB rows | Max 5–10 MB per request, small scale |
 | `PeriodicTimer(24h)` resets on restart | Cleanup may run slightly late after restart | Daily timing is not critical |
-| Soft-deleted tokens remain in DB | DB accumulates inactive rows | Negligible at < 100 URL scale |
+| Deactivated (paused) tokens remain in DB for audit trail | DB grows with paused tokens; receiver still hits them for 410 lookup | Intentional — the deactivate path (`UpdateToken { isActive: false }`) preserves history. The **delete** path is hard-delete + EF cascade — see §16. |
 | `RetentionCleanupService` first tick is 24h after startup | No cleanup on day of startup | Acceptable |
 | No bulk export (all requests for a token) | Out of scope | Documented as future path |
+| Redis is a runtime dependency | A Redis outage stops webhook ingest (streams) and disables SSE fan-out; cache and session-revocation are fail-open | Cache + session-revocation degrade gracefully; the StreamWorker fails loud (entries are durably ACK-tracked once Redis is back). The deployment runs Redis alongside SQL Server in docker-compose; for HA use Redis Sentinel or a managed Redis. |
+| StreamWorker requires a stable `HOOKBIN_WORKER_ID` | Docker container IDs change between runs; without a stable consumer name, PEL entries orphan and never get reclaimed | docker-compose pins `HOOKBIN_WORKER_ID=stream-worker-1`. CLAUDE.md DANGER ZONE flags this as an invariant. Future automatic PEL-reclaim path documented in §18. |
+| JobsWorker runs single-replica only | No leader election — running two replicas would double-delete on every 24-hour tick (benign but wasteful, and risks deadlocks on overlapping range scans) | docker-compose pins `deploy.replicas: 1`. Acceptable until retention scans become latency-critical; future HA path documented in §18. |
 | Single admin account | No per-user roles or multi-user support | Sufficient for single-operator self-hosted use; multi-user path: add user table + roles |
 
 ---
@@ -1254,11 +1368,14 @@ Review the generated migration before committing. Destructive changes (column dr
 
 | Feature | Trigger | Migration Path |
 |---------|---------|----------------|
-| Redis for SSE + distributed cache | API needs horizontal scaling | Replace `SseNotifier` with Redis Pub/Sub; replace `IMemoryCache` with `IDistributedCache`. `ISseNotifier` interface unchanged. |
 | Multi-user / RBAC | Multiple operators with separate credentials | Add user table + roles; replace single `AuthOptions` with a user store. Domain/Application layers unchanged. |
 | Full-Text Search | `LIKE` too slow at scale | Add FTS catalog in EF migration; replace `LIKE` with `EF.Functions.Contains()`. One handler change. |
-| Bulk export | User request | `GET /api/tokens/{uuid}/requests/export` returning NDJSON or ZIP. |
-| Hangfire | Complex scheduled jobs needed | Add `Hookbin.Worker` project; move `RetentionCleanupService` to recurring Hangfire job. |
+| Bulk export | User request | `GET /api/tokens/{uuid}/requests/export` returning NDJSON or ZIP per token. |
+| HA JobsWorker via leader election | More than one operator wants retention to keep running through a JobsWorker pod restart with overlap | Replace the single-replica constraint with a Redis-based lease (`SET wh:jobs-leader NX PX 60s`); only the lease-holder runs the periodic timer. Existing service code stays; add a leader-election wrapper. |
+| Automatic PEL-orphan reclaim | StreamWorker container IDs accidentally drift (e.g., consumer name was unset) | Periodic `XAUTOCLAIM` from a designated reclaimer on entries older than N seconds; would let the system survive a misconfigured `HOOKBIN_WORKER_ID` without manual intervention. |
+| OpenTelemetry traces | Multi-process flow harder to follow than single-process | Add OTel instrumentation across API + StreamWorker + JobsWorker; export to SEQ or a tracing-native backend. SEQ structured logs already exist — traces complement them with parent/child spans. |
+| Optional PII / secret redaction toggle | Deployments where the admin should not see raw `Cookie` / `Authorization` / vendor HMAC headers | Add a per-token or global `REDACT_HEADERS` config; persist redacted copies alongside originals or hash-only. Today's default (no redaction) is documented in §11. |
+| Signed-URL forwarding to external sinks | Want to mirror captured requests to Slack/Discord/another webhook | Outbound publisher subscribed to `RedisSseBridgeService` events; per-token destination URL and shared-secret HMAC. Wraps existing data with no schema change. |
 
 ---
 

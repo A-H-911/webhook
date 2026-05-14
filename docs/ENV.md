@@ -181,35 +181,37 @@ node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('YourSecurePassword123!
 
 ---
 
-## Redis (Stream Worker)
+## Redis
+
+Redis 7 is a **first-class runtime dependency** of the API and the StreamWorker. The JobsWorker does not use Redis directly. The API uses Redis for the token cache (`RedisTokenCache`), the SSE Pub/Sub bridge (`RedisSseBridgeService`), and session revocation (`RedisSessionRevocationStore`). The StreamWorker uses Redis Streams (consumer group `webhook-api`) for at-least-once webhook persistence.
 
 ### `HOOKBIN_WORKER_ID`
 
-**Required:** No  
-**Default:** `stream-worker-1` (in docker-compose.yml)  
-**Description:** Stable consumer identity for the Redis stream consumer group.
+**Required:** No (StreamWorker only)
+**Default:** `stream-worker-1` (in docker-compose.yml)
+**Description:** Stable consumer identity for the Redis stream consumer group (`webhook-api`).
 
 **Notes:**
-- Used by `StreamWorker` to recover pending messages (PEL) on restart
-- Should be static across container restarts to maintain PEL consistency
-- If this changes, old pending messages are orphaned permanently
-- Only override in multi-replica scenarios; single-instance default is fine
+- Used by `StreamWorker` to recover pending messages (PEL) on restart via `XREADGROUP "0-0"`.
+- Must be static across container restarts. Docker container IDs change on every `docker run`; without a pinned value, old PEL entries are orphaned permanently (no automatic reclaim today — see roadmap).
+- The API and JobsWorker do not read this variable.
 
 ### `ConnectionStrings__Redis`
 
-**Required:** Yes (for `stream-worker`)  
-**Default:** `redis:6379` (in docker-compose.yml)  
-**Description:** Redis connection string for stream consumer and token cache.
+**Required:** Yes (API and StreamWorker)
+**Default:** `redis:6379` (in docker-compose.yml)
+**Description:** Redis connection string. The same Redis instance backs the token cache, SSE Pub/Sub bridge, session revocation, and the webhook stream.
 
-**Format:** `hostname:port` or `hostname:port,hostname:port` (for sentinel/cluster)  
+**Format:** `hostname:port` or `hostname:port,hostname:port` (for sentinel/cluster)
 **Examples:**
 - Docker Compose: `redis:6379`
 - Local: `localhost:6379`
 - Production: `redis-primary.internal:6379`
 
-**Notes:**
-- Only required if running `StreamWorker`
-- API and JobsWorker use `IMemoryCache` (in-process)
+**Failure semantics:**
+- Token cache and session-revocation paths are **fail-open** — a Redis outage degrades to direct DB reads and "session not revoked" defaults; the admin keeps working.
+- Webhook stream ingest is **fail-loud** — `RedisStreamConsumerService` cannot persist captured requests if Redis is unreachable, so the StreamWorker pauses until Redis is back. Captured requests buffer in Redis until then.
+- The JobsWorker does not depend on Redis.
 
 ---
 

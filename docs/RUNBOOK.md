@@ -637,19 +637,23 @@ The API uses `.AsNoTracking()` on all SELECT queries for performance. If queries
 #   .HasName("IX_WebhookRequests_TokenId_ReceivedAt_Id");
 ```
 
-### Memory Cache Tuning
+### Token Cache Tuning
 
-Token cache uses 5-minute sliding expiration:
+The token cache is **Redis-backed** behind the `ITokenCache` port (`src/Hookbin.Application/Caching/ITokenCache.cs`), implemented by `RedisTokenCache` (`src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs`). Key prefix `wh:token:`, JSON-serialized `WebhookToken`, 5-minute **sliding** TTL (extended on each cache hit via `KeyExpireAsync`). The cache is **fail-open** — `RedisException`/`RedisTimeoutException` are caught and logged; handlers fall back to the database. Cross-instance invalidation is automatic because every API instance shares the same Redis keyspace.
 
 ```bash
-# View cache configuration (src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs)
-# Current: IMemoryCache with 5-minute sliding expiry
+# Inspect a cache entry directly (use ConnectionStrings__Redis from .env)
+docker compose exec redis redis-cli GET "wh:token:<guid>"
 
-# To tune:
-# 1. Increase expiry time (less DB hits, but stale data longer)
-# 2. Decrease expiry time (fresher data, more DB hits)
+# Inspect TTL
+docker compose exec redis redis-cli TTL "wh:token:<guid>"
 
-# Edit RedisTokenCache constructor and restart
+# Force-invalidate one token (rare — handlers do this automatically on mutation)
+docker compose exec redis redis-cli DEL "wh:token:<guid>"
+
+# To tune the TTL, edit the Ttl constant in RedisTokenCache.cs and restart the API.
+# Trade-off: longer TTL = fewer DB hits but staler IsActive/CustomResponse data
+# until the next mutation triggers RemoveAsync.
 ```
 
 ### Request Size Limits

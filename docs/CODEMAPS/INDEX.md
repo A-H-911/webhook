@@ -170,7 +170,7 @@ No feature changes, no infrastructure changes, no breaking API changes.
 
 ### New Interfaces
 - **`IRequestQueuePublisher`** (Domain) → `RedisStreamPublisher` — decouples `WebhookController` from Redis XADD
-- **`ITokenCache`** (Application/Caching) → `RedisTokenCache` — wraps `IMemoryCache` with typed contract
+- **`ITokenCache`** (Application/Caching) → `RedisTokenCache` — JSON-serialized `WebhookToken` at key `wh:token:{guid}`, 5-minute sliding TTL via `KeyExpireAsync`, fail-open on `RedisException`/`RedisTimeoutException`
 - **`ISessionRevocationStore`** (API/Services) → `RedisSessionRevocationStore` — session revocation on logout
 
 ### Infrastructure

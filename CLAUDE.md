@@ -130,7 +130,7 @@ docker/
 
 **Retention cleanup:** `RetentionCleanupService` is a `BackgroundService` running on a 24-hour `PeriodicTimer` with `IServiceScopeFactory`. It runs in the **`Hookbin.JobsWorker`** process (not the API). Hangfire is not used. DB errors are caught and logged without stopping the timer. `jobs-worker` must run as **single replica only** — no leader election exists.
 
-**Token cache:** `IMemoryCache` key `"token:{guid}"` with 5-minute sliding expiration. **Null results are never cached** — cache entry is explicitly removed when token is not found. Both active and inactive tokens are cached (receiver needs fast 410 lookup). `SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`, and `UpdateToken` all call `cache.Remove(tokenId)` after mutating.
+**Token cache:** `ITokenCache` port (`src/Hookbin.Application/Caching/ITokenCache.cs`) backed by **Redis** via `RedisTokenCache` (`src/Hookbin.Infrastructure/Redis/RedisTokenCache.cs`). Key `wh:token:{guid}`, JSON-serialized `WebhookToken`, 5-minute **sliding** TTL (`KeyExpireAsync` extends on read). **Fail-open** — `RedisException`/`RedisTimeoutException` are caught and logged; handlers fall back to the database. **Null results are never cached.** Both active and inactive tokens are cached (receiver needs fast 410 lookup). `SetCustomResponse`, `ResetCustomResponse`, `DeleteToken`, and `UpdateToken` all call `tokenCache.RemoveAsync(token.Token, ct)` after mutating.
 
 **Inactive token audit trail:** Receiver path uses `GetByTokenIncludingInactiveAsync` (not filtered by `IsActive`) and **always** persists requests from inactive tokens. Returns 410 Gone but request is recorded in DB for compliance/audit purposes. Note: this **deactivate** path (setting `IsActive=false` via `UpdateToken`) is distinct from the **delete** path (`DeleteTokenCommand`), which hard-deletes both the token row and all its `WebhookRequest` rows via EF Core cascade.
 
@@ -153,6 +153,14 @@ docker/
 **PowerShell encoding:** Use `[System.IO.File]::ReadAllText/WriteAllText` with `System.Text.Encoding.UTF8`. Never use bare `Get-Content`/`Set-Content` on UTF-8 files — they silently corrupt non-ASCII.
 
 **ForwardedHeaders:** Nginx sets `X-Forwarded-For`; the API reads it via `ForwardedHeaders` middleware to capture the real client IP in `WebhookRequest.IpAddress`.
+
+**Session revocation:** Logout calls `RedisSessionRevocationStore.RevokeAsync(sid, ttl)` writing `wh:revoked-session:{sid}` to Redis. `OnValidatePrincipal` reads that key on every authenticated request and rejects revoked sessions with 401. Fail-open on Redis outage (so an outage doesn't lock the admin out). Cross-instance by construction.
+
+**Rate limiting:** Two `UseRateLimiter` partitions — webhook receiver (default 250/sec per `{token:guid}`) and login (5/min per real client IP). Both rely on `UseForwardedHeaders` resolving the real IP first.
+
+**Antiforgery:** `o.HeaderName = "X-XSRF-TOKEN"`; middleware at `Program.cs:199-209` emits the `XSRF-TOKEN` cookie automatically on authenticated requests. Angular `HttpClient` round-trips it. Header rename or missing cookie = 400 on every state-changing request.
+
+**GeoIP enrichment:** `WebhookRequest.IpCountry` is populated by `WebhookController.Receive` on the API hot path (`WebhookController.cs:37`) via `IGeoIpService.GetCountry(ipAddress)` (MaxMind GeoLite2) — **not** by the StreamWorker. Enrichment happens before the XADD so the country tag travels through the stream payload. Falls back to `null` for private IPs and lookup misses.
 
 ---
 
@@ -250,7 +258,7 @@ public async Task<IActionResult> Archive(Guid id)
 }
 ```
 
-**5. If mutating cached token data:** Call `cache.Remove(cmd.TokenId)` in the handler. Skipping this serves stale data for up to 5 minutes.
+**5. If mutating cached token data:** Inject `ITokenCache` and call `await tokenCache.RemoveAsync(token.Token, cancellationToken)` in the handler. Skipping this serves stale data for up to 5 minutes (Redis sliding TTL). The cache backend is Redis (`wh:token:{guid}`) — invalidation is cross-instance.
 
 **6. Architecture tests enforce conventions automatically.** The tests in `tests/Hookbin.ArchitectureTests/` will fail the CI `architecture-test` job if: the command is not a `sealed record`, the handler is not `internal sealed`, the validator does not inherit `AbstractValidator`, or the folder does not match the namespace. Run `dotnet test tests/Hookbin.ArchitectureTests/` locally before pushing.
 
@@ -290,7 +298,7 @@ Backend coverage thresholds are enforced via `tests/coverlet.runsettings` (80% l
 |-----------|-------------------------------------|
 | SSE wire event name `event: request` | Angular `SseService` hardcodes `addEventListener('request', ...)`. Rename the server side → Angular stops receiving events with no error. |
 | `Headers` field type `string` (raw JSON) on both C# and Angular | The dialog validates with `JSON.parse` but sends the raw string. Changing to `object` on one side → 400 or silent empty headers. |
-| `cache.Remove(tokenId)` on every token mutation | Omitting it → stale custom response or active-state served for up to 5 minutes. |
+| `tokenCache.RemoveAsync(token.Token)` on every token mutation (`ITokenCache` → `RedisTokenCache`, key `wh:token:{guid}`) | Omitting it → stale custom response or active-state served for up to 5 minutes across every API instance (Redis is cross-instance). |
 | `if (context.Response.HasStarted) return;` guard in `GlobalExceptionMiddleware` | SSE responses already flushed headers. Without this guard, setting `StatusCode` throws `InvalidOperationException`. |
 | Silent swallow of `OperationCanceledException` when `RequestAborted.IsCancellationRequested` | Normal SSE client disconnect. Logging it as an error floods SEQ on every tab close. |
 | `.AsNoTracking()` on all repository reads | Removing it enables EF Core change tracking on read-only queries; mutations in the same scope may unexpectedly persist phantom changes. |
@@ -317,6 +325,11 @@ Backend coverage thresholds are enforced via `tests/coverlet.runsettings` (80% l
 | `AUTH_PASSWORD_HASH` is a BCrypt hash, never plaintext | The validator checks the `$2` prefix at startup. Plaintext fails validation and the app refuses to start. Use `tools/RotatePassword/` to generate a new hash: `dotnet run --project tools/RotatePassword -- --password '<strong>'`. Never commit the hash to source control. |
 | `Headers`, `Body`, `IpAddress` are persisted **unredacted** by design | Single-admin trust model — only one admin account exists. All captured data (including `Cookie` headers and vendor HMAC secrets) is visible to the admin in the UI, DB, and SEQ. This is intentional. Never add automatic redaction without explicit approval from the deployment owner. |
 | `[mat-dialog-close]="null"` (with binding) on the Cancel button in `CreateTokenDialogComponent` | `mat-dialog-close` without a value binding closes with `""` (empty string), not `undefined`. The dashboard guard uses `== null`, so `""` bypasses it and silently creates a no-description token. |
+| Redis cache and session-revocation paths are **fail-open**; Redis Streams ingest is **fail-loud** | `RedisTokenCache` and `RedisSessionRevocationStore` catch `RedisException`/`RedisTimeoutException` and return safe defaults (DB fallback / `IsRevoked=false`) — a Redis outage should not lock the admin out or 500 every read. `RedisStreamConsumerService` does NOT mask outages; webhook ingest stops until Redis is back. Adding fail-open to the stream path would silently drop captured requests — never do this. |
+| `RedisSessionRevocationStore.RevokeAsync` is called on logout with TTL ≥ session cookie lifetime | If the revocation TTL is shorter than the cookie's sliding window, a revoked session's marker expires before the cookie does, and the user is silently re-authenticated. Always pass `Auth__SessionHours` (matching the cookie). |
+| Antiforgery `HeaderName = "X-XSRF-TOKEN"` and the cookie-emit middleware at `Program.cs:199-209` | The header name is the contract Angular `HttpClient` automatically round-trips from the `XSRF-TOKEN` cookie. Changing the name on the server breaks every state-changing API call from the SPA. Removing the cookie-emit middleware → no cookie → no header → 400 on every PUT/POST/DELETE. |
+| Two `UseRateLimiter` policies — `"webhook-receiver"` (token-bucket partitioned by `{token:guid}` route value, default 250/sec) and `"login"` (fixed window, **global, no partition**, 5/min) | Per-token bucket isolates noisy producers without affecting unrelated tokens. The login policy is intentionally **global** (not per-IP) because under the single-admin model an attacker rotating IPs would defeat per-IP partitioning; the trade-off is that a brute-force attempt may briefly block the legitimate operator. Don't introduce a per-IP partition without re-evaluating that trade-off. |
+| `ITokenCache` is the abstraction; `RedisTokenCache` is the only production implementation. Never bind `IMemoryCache` to token caching | Mixing the two would mean some instances cache locally and never see cross-instance invalidations — stale custom responses returned for up to 5 minutes per affected instance. If you need a swappable cache, swap the `ITokenCache` implementation in DI, not the consumer. |
 
 ---
 
