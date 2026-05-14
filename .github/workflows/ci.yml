@@ -100,6 +100,13 @@ jobs:
             **/obj/**
           retention-days: 1
           if-no-files-found: error
+          # v4 excludes hidden files by default (breaking change from v3).
+          # Required so the `.playwright/` directory in
+          # tests/Hookbin.E2ETests/bin/Release/net10.0/.playwright/ — which
+          # contains Playwright's browser launchers and node assets — survives
+          # the round-trip to the e2e-test job. Without this, Playwright fails
+          # with "assembly was found, but is missing required assets".
+          include-hidden-files: true
 
   # --------------------------------------------------------------------------
   # Unit tests — fast feedback, gates integration & e2e.

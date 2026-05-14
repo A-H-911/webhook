@@ -14,9 +14,11 @@
 
 name: CodeQL
 
+# Runs on pull_request + weekly schedule only — NOT on every push to main.
+# Direct pushes to main (admin bypass) won't trigger a CodeQL scan, but the
+# next PR or the next weekly run will catch any regression. This saves one
+# parallel workflow execution per push and avoids two workflows-per-commit.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   schedule:
