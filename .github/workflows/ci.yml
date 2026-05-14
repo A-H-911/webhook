@@ -389,9 +389,13 @@ jobs:
           AUTH_SESSION_HOURS=8
           EOF
           # RotatePassword appends/sets AUTH_PASSWORD_HASH in .env.
-          # --no-build is safe: the project was compiled in build-dotnet and
-          # restored by the artifact download.
-          dotnet run --no-build --configuration Release \
+          # NOTE: do NOT pass --no-build here. actions/upload-artifact@v4 does
+          # not reliably preserve file mtimes, and `dotnet run --no-build` does
+          # a project-level staleness check that fails if the .csproj appears
+          # newer than the .dll. `dotnet test --no-build` is fine (it skips
+          # that check) but `dotnet run` is stricter. The incremental rebuild
+          # is fast since obj/Release is already populated by the artifact.
+          dotnet run --configuration Release \
             --project tools/RotatePassword -- --password "$E2E_AUTH_PASSWORD"
           # Export hash to shell env so docker compose uses shell precedence.
           # BCrypt '$' chars are otherwise expanded by compose's .env parser.
