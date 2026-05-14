@@ -1,0 +1,45 @@
+# ============================================================================
+# Dependency Review
+#
+# Diffs the dependency manifest changes in a pull request against the GitHub
+# Advisory Database. Fails the check when a PR adds a package with a known
+# vulnerability at or above the configured severity threshold.
+#
+# Covers:
+#   - NuGet packages (.csproj PackageReference changes)
+#   - npm packages (frontend/hookbin-spa/package-lock.json changes)
+#
+# Inline PR comment lists the offending packages, the advisory IDs, and the
+# minimum non-vulnerable version. Configure exceptions via the `allow-ghsas`
+# input if a finding is accepted for the repo (document the reason in the PR).
+# ============================================================================
+
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write # post the review comment
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Block merge on "high" or worse. Tighten to "moderate" if the
+          # repo's risk posture warrants; loosen to "critical" only after
+          # auditing existing baseline.
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+          # License denylist: AGPL family (strong copyleft, often disallowed
+          # in commercial deployments). Adjust per your compliance posture.
+          deny-licenses: AGPL-1.0-or-later, AGPL-3.0-or-later

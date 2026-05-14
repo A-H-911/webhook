@@ -1,0 +1,69 @@
+# ============================================================================
+# CodeQL Static Analysis
+#
+# Scans C# (.NET source under src/, tools/, tests/) and JavaScript/TypeScript
+# (Angular SPA under frontend/) for security vulnerabilities and code-quality
+# issues. Results land in GitHub Security → Code scanning and appear inline
+# on PR diffs.
+#
+# Runs independently of CI — never blocks merge, but surfaces findings as
+# review feedback. To block merge on CodeQL findings, add this workflow's
+# "Analyze (csharp)" / "Analyze (javascript-typescript)" jobs to branch
+# protection's required status checks.
+# ============================================================================
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan on Sundays at 03:14 UTC — catches drift in dependencies
+    # and lets fresh CodeQL query packs find issues in unchanged code.
+    - cron: "14 3 * * 0"
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to Code Scanning
+  actions: read          # required by github/codeql-action when analyzing private repos
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (for csharp autobuild)
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Use the security-and-quality query suite for richer findings.
+          # Switch to "security-extended" if you want fewer false positives.
+          queries: security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

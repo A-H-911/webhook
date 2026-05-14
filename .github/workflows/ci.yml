@@ -1,3 +1,40 @@
+# ============================================================================
+# CI Pipeline for Hookbin
+#
+# Job graph (dependencies enforced by `needs:`):
+#
+#     build-dotnet ─┬─→ unit-test ──────────┐
+#                   └─→ architecture-test ──┤
+#                                           ├─→ integration-test ─┐
+#     frontend-build ────────────────────────┤                    ├─→ ci-summary
+#                                           └─→ e2e-test ─────────┘
+#
+# Build .NET once, share the bin/+obj/ artifact downstream. Unit + architecture
+# tests gate integration; unit + architecture + frontend gate e2e. `ci-summary`
+# is the single required status check for branch protection.
+#
+# ----------------------------------------------------------------------------
+# Required GitHub Repository Secrets
+# ----------------------------------------------------------------------------
+# Configure under: Settings → Secrets and variables → Actions → New repository secret
+#
+#   E2E_AUTH_PASSWORD     Plaintext password used by the E2E suite. Fed to
+#                         tools/RotatePassword to generate the BCrypt hash
+#                         consumed by the API container at startup.
+#                         Suggested value: AdminPass123!
+#
+#   SA_PASSWORD           SQL Server `sa` password for the compose stack
+#                         spun up during E2E. Must satisfy SQL Server
+#                         password complexity (>=8 chars, upper+lower+digit/symbol).
+#                         Suggested value: Local!Dev_Sa_Pw_123
+#
+# If a secret is unset, the workflow falls back to the documented suggested
+# value so first-run CI does not break. Do NOT mirror these test values into
+# any deployed environment — they exist only on ephemeral GHA runners.
+#
+# These secrets are also documented in .env.example under "CI/CD Secrets".
+# ============================================================================
+
 name: CI
 
 on:
@@ -6,27 +43,111 @@ on:
   pull_request:
     branches: [main]
 
-jobs:
-  build-and-test:
-    name: Build & Unit Tests
-    runs-on: ubuntu-latest
+# Cancel superseded PR runs (a later push obsoletes the in-flight run).
+# Do NOT cancel pushes to main — every commit on main must be verified.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Default permissions: least-privilege read-only. Individual jobs widen scope
+# (e.g. `checks: write` for dorny/test-reporter) only where needed.
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.x"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  NODE_VERSION: "22"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Compile the .NET solution once; downstream test jobs reuse the artifact.
+  # --------------------------------------------------------------------------
+  build-dotnet:
+    name: Build .NET solution
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
         run: dotnet restore
 
-      - name: Build
+      - name: Build (Release)
         run: dotnet build --no-restore --configuration Release
 
-      - name: Unit tests
-        run: dotnet test tests/Hookbin.UnitTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=unit-results.trx" --results-directory ./TestResults
+      # Share compiled output with all downstream .NET jobs. obj/ is required
+      # by `dotnet test --no-build --no-restore` to resolve project.assets.json.
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-build-output
+          path: |
+            **/bin/Release/**
+            **/obj/**
+          retention-days: 1
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # Unit tests — fast feedback, gates integration & e2e.
+  # --------------------------------------------------------------------------
+  unit-test:
+    name: Unit tests
+    needs: build-dotnet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write # dorny/test-reporter posts inline check annotations
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: dotnet-build-output
+
+      - name: Run unit tests
+        run: >
+          dotnet test tests/Hookbin.UnitTests/
+          --no-build --no-restore --configuration Release
+          --settings tests/coverlet.runsettings
+          --logger "trx;LogFileName=unit-results.trx"
+          --results-directory ./TestResults
+
+      - name: Publish test results (inline PR annotations)
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Unit tests
+          path: TestResults/unit-results.trx
+          reporter: dotnet-trx
+          fail-on-error: false
 
       - name: Upload test results
         if: always()
@@ -35,88 +156,97 @@ jobs:
           name: unit-test-results
           path: TestResults/
 
+  # --------------------------------------------------------------------------
+  # Architecture tests — ArchUnitNET+NetArchTest. No infrastructure required.
+  # Gates integration & e2e: an architecture-rule violation should fail fast.
+  # --------------------------------------------------------------------------
   architecture-test:
-    name: Architecture Tests
+    name: Architecture tests
+    needs: build-dotnet
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
 
-      - name: Build architecture tests
-        run: dotnet build tests/Hookbin.ArchitectureTests --configuration Release --no-restore
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: dotnet-build-output
 
       - name: Run architecture tests
-        run: dotnet test tests/Hookbin.ArchitectureTests --no-build --configuration Release --logger "trx;LogFileName=arch-results.trx" --results-directory ./TestResults
+        run: >
+          dotnet test tests/Hookbin.ArchitectureTests/
+          --no-build --no-restore --configuration Release
+          --logger "trx;LogFileName=arch-results.trx"
+          --results-directory ./TestResults
+
+      - name: Publish test results (inline PR annotations)
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Architecture tests
+          path: TestResults/arch-results.trx
+          reporter: dotnet-trx
+          fail-on-error: false
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: arch-test-results
-          path: TestResults/arch-results.trx
-
-  integration-test:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: build-and-test
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.x"
-
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
-
-      - name: Integration tests (Docker via Testcontainers)
-        run: dotnet test tests/Hookbin.IntegrationTests/ --no-build --configuration Release --settings tests/coverlet.runsettings --logger "trx;LogFileName=integration-results.trx" --results-directory ./TestResults
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-results
           path: TestResults/
 
-  frontend:
-    name: Frontend Build
+  # --------------------------------------------------------------------------
+  # Frontend build & unit tests — Angular 21 production build + Karma/Jasmine.
+  # Output (dist/) is what gets baked into the nginx container at deploy time.
+  # --------------------------------------------------------------------------
+  frontend-build:
+    name: Frontend build & test
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
           cache-dependency-path: frontend/hookbin-spa/package-lock.json
 
       - name: Install dependencies
         working-directory: frontend/hookbin-spa
         run: npm ci
 
-      - name: Build
+      - name: Build (Angular production)
         working-directory: frontend/hookbin-spa
         run: npm run build
 
       - name: Unit tests with coverage
         working-directory: frontend/hookbin-spa
         run: npm test -- --watch=false --coverage
+
+      - name: Upload frontend build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-output
+          path: frontend/hookbin-spa/dist/
+          retention-days: 1
 
       - name: Upload coverage report
         if: always()
@@ -125,65 +255,190 @@ jobs:
           name: frontend-coverage
           path: frontend/hookbin-spa/coverage/
 
-  e2e-test:
-    name: E2E Tests
+  # --------------------------------------------------------------------------
+  # Integration tests — Testcontainers MSSQL. Gated on unit + arch.
+  # --------------------------------------------------------------------------
+  integration-test:
+    name: Integration tests
+    needs: [unit-test, architecture-test]
     runs-on: ubuntu-latest
-    needs: [build-and-test, frontend]
-
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: dotnet-build-output
 
-      - name: Prepare .env with generated AUTH_PASSWORD_HASH
+      - name: Run integration tests (Testcontainers MSSQL)
+        run: >
+          dotnet test tests/Hookbin.IntegrationTests/
+          --no-build --no-restore --configuration Release
+          --settings tests/coverlet.runsettings
+          --logger "trx;LogFileName=integration-results.trx"
+          --results-directory ./TestResults
+
+      - name: Publish test results (inline PR annotations)
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Integration tests
+          path: TestResults/integration-results.trx
+          reporter: dotnet-trx
+          fail-on-error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: TestResults/
+
+  # --------------------------------------------------------------------------
+  # E2E tests — full docker compose stack + Playwright.
+  # Gated on unit + arch + frontend (Angular SPA must build cleanly).
+  # --------------------------------------------------------------------------
+  e2e-test:
+    name: E2E tests
+    needs: [unit-test, architecture-test, frontend-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    env:
+      REBUILD_TIMEOUT_SECONDS: "180"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: dotnet-build-output
+
+      # Buildx is the modern docker builder; `install: true` makes it the
+      # default backend for `docker build` / `docker compose build`, which is
+      # required for the GHA layer cache below.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      # Pre-build all compose images via buildx bake with GitHub Actions cache.
+      # On subsequent runs this reuses layers across the api, stream-worker,
+      # jobs-worker, and frontend images. rebuild-and-wait.sh's `compose build`
+      # becomes a near-no-op when the cache is hot.
+      - name: Pre-build compose images with GHA layer cache
+        uses: docker/bake-action@v5
+        with:
+          files: docker-compose.yml
+          load: true
+          set: |
+            *.cache-from=type=gha,scope=hookbin-compose
+            *.cache-to=type=gha,mode=max,scope=hookbin-compose
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/Hookbin.E2ETests/Hookbin.E2ETests.csproj') }}
+
+      # Generate .env with a fresh BCrypt hash. The plaintext password and
+      # SA_PASSWORD come from repository secrets when set, otherwise fall
+      # back to documented test defaults (safe on ephemeral CI runners).
+      - name: Generate .env (BCrypt hash for AUTH_PASSWORD_HASH)
         env:
-          E2E_AUTH_PASSWORD: AdminPass123!
+          E2E_AUTH_PASSWORD: ${{ secrets.E2E_AUTH_PASSWORD || 'AdminPass123!' }}
+          SA_PASSWORD: ${{ secrets.SA_PASSWORD || 'Local!Dev_Sa_Pw_123' }}
         run: |
-          cat > .env <<'EOF'
-          SA_PASSWORD=Local!Dev_Sa_Pw_123
+          cat > .env <<EOF
+          SA_PASSWORD=${SA_PASSWORD}
           HOOKBIN_BASE_URL=http://localhost:8088
           RETENTION_DAYS=7
           MAX_REQUEST_SIZE_MB=5
           AUTH_USERNAME=admin
           AUTH_SESSION_HOURS=8
           EOF
-          dotnet run --project tools/RotatePassword -- --password "$E2E_AUTH_PASSWORD"
-          # Export to shell env so Docker Compose uses shell precedence over .env file.
-          # BCrypt hashes contain '$' chars that Docker Compose expands when reading .env directly.
+          # RotatePassword appends/sets AUTH_PASSWORD_HASH in .env.
+          # --no-build is safe: the project was compiled in build-dotnet and
+          # restored by the artifact download.
+          dotnet run --no-build --configuration Release \
+            --project tools/RotatePassword -- --password "$E2E_AUTH_PASSWORD"
+          # Export hash to shell env so docker compose uses shell precedence.
+          # BCrypt '$' chars are otherwise expanded by compose's .env parser.
           echo "AUTH_PASSWORD_HASH=$(grep '^AUTH_PASSWORD_HASH=' .env | cut -d= -f2-)" >> "$GITHUB_ENV"
           echo "Generated .env (hash redacted):"
           grep -v '^AUTH_PASSWORD_HASH=' .env
 
       - name: Start stack and wait for health
         run: bash scripts/rebuild-and-wait.sh
-        env:
-          REBUILD_TIMEOUT_SECONDS: 180
 
-      - name: Install Playwright browsers
+      # First-time runs install browser binaries + OS deps. Cache-hit path
+      # skips browser install but still installs OS deps (apt packages aren't
+      # cached on the runner).
+      - name: Install Playwright (browsers + OS deps)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pwsh tests/Hookbin.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
+      - name: Install Playwright OS deps (cache-hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pwsh tests/Hookbin.E2ETests/bin/Release/net10.0/playwright.ps1 install-deps chromium
+
       - name: Run E2E tests
-        run: dotnet test tests/Hookbin.E2ETests/ --no-build --configuration Release --logger "trx;LogFileName=e2e-results.trx" --results-directory ./TestResults
         env:
           E2E_BASE_URL: http://localhost:8088
           E2E_AUTH_USERNAME: admin
-          E2E_AUTH_PASSWORD: AdminPass123!
-          SA_PASSWORD: Local!Dev_Sa_Pw_123
+          E2E_AUTH_PASSWORD: ${{ secrets.E2E_AUTH_PASSWORD || 'AdminPass123!' }}
+          SA_PASSWORD: ${{ secrets.SA_PASSWORD || 'Local!Dev_Sa_Pw_123' }}
+        run: >
+          dotnet test tests/Hookbin.E2ETests/
+          --no-build --no-restore --configuration Release
+          --logger "trx;LogFileName=e2e-results.trx"
+          --results-directory ./TestResults
 
       - name: Dump container logs on failure
         if: failure()
         run: |
-          docker compose ps
-          docker compose logs --no-color --tail=200 sqlserver api stream-worker jobs-worker || true
+          docker compose ps || true
+          docker compose logs --no-color --tail=200 sqlserver api stream-worker jobs-worker frontend redis || true
+
+      - name: Publish test results (inline PR annotations)
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: E2E tests
+          path: TestResults/e2e-results.trx
+          reporter: dotnet-trx
+          fail-on-error: false
 
       - name: Upload test results and traces
         if: always()
@@ -193,3 +448,46 @@ jobs:
           path: |
             TestResults/
             tests/Hookbin.E2ETests/bin/Release/net10.0/playwright-traces/
+
+  # --------------------------------------------------------------------------
+  # Single required status check for branch protection. Point branch
+  # protection at THIS job's name ("CI summary") instead of the six
+  # individual jobs — keeps branch protection stable when adding new jobs.
+  # --------------------------------------------------------------------------
+  ci-summary:
+    name: CI summary
+    if: always()
+    needs:
+      - build-dotnet
+      - unit-test
+      - architecture-test
+      - frontend-build
+      - integration-test
+      - e2e-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate job results
+        env:
+          BUILD: ${{ needs.build-dotnet.result }}
+          UNIT: ${{ needs.unit-test.result }}
+          ARCH: ${{ needs.architecture-test.result }}
+          FRONTEND: ${{ needs.frontend-build.result }}
+          INTEGRATION: ${{ needs.integration-test.result }}
+          E2E: ${{ needs.e2e-test.result }}
+        run: |
+          echo "build-dotnet:       $BUILD"
+          echo "unit-test:          $UNIT"
+          echo "architecture-test:  $ARCH"
+          echo "frontend-build:     $FRONTEND"
+          echo "integration-test:   $INTEGRATION"
+          echo "e2e-test:           $E2E"
+          if [ "$BUILD" != "success" ] \
+             || [ "$UNIT" != "success" ] \
+             || [ "$ARCH" != "success" ] \
+             || [ "$FRONTEND" != "success" ] \
+             || [ "$INTEGRATION" != "success" ] \
+             || [ "$E2E" != "success" ]; then
+            echo "::error::One or more required jobs failed, were cancelled, or were skipped."
+            exit 1
+          fi
+          echo "All required jobs passed."
