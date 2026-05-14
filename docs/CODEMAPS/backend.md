@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-13 | Files scanned: 59 src + 50 tests | Token estimate: ~950 -->
+<!-- Generated: 2026-05-14 | Files scanned: 59 src + 50 tests | Token estimate: ~950 -->
 
 # Backend (.NET 10)
 
@@ -76,7 +76,7 @@ ForwardedHeaders → GlobalExceptionMiddleware → CORS (dev only) → Static
 |---|---|---|---|
 | `Tokens/Commands/CreateToken/` | `CreateTokenCommand` | yes (name ≤80) | n/a |
 | `Tokens/Commands/UpdateToken/` | `UpdateTokenCommand` | yes | `cache.Remove(tokenId)` |
-| `Tokens/Commands/DeleteToken/` | `DeleteTokenCommand` | - | `cache.Remove(tokenId)` |
+| `Tokens/Commands/DeleteToken/` | `DeleteTokenCommand` | - | `cache.Remove(tokenId)` — **hard-delete**: EF cascade removes child `WebhookRequest` rows; receiver returns 404 after delete |
 | `Tokens/Commands/SetCustomResponse/` | `SetCustomResponseCommand` | yes (Headers JSON object) | `cache.Remove(tokenId)` |
 | `Tokens/Commands/ResetCustomResponse/` | `ResetCustomResponseCommand` | - | `cache.Remove(tokenId)` |
 | `Requests/Commands/SetRequestNote/` | `SetRequestNoteCommand` | yes (≤2000 chars) | n/a |
@@ -105,7 +105,7 @@ Persistence/
   Repositories/    WebhookTokenRepository.cs, WebhookRequestRepository.cs   (.AsNoTracking on reads)
 Redis/
   RedisStreamPublisher.cs         (XADD webhook-requests)
-  RedisStreamConsumerService.cs   (XREADGROUP + PEL recovery + XACK)
+  RedisStreamConsumerService.cs   (XREADGROUP + PEL recovery + XACK; FK violations from hard-delete race ACKed + dropped)
   RedisSseBridgeService.cs        (SUBSCRIBE sse:* → SseNotifier.NotifyAsync)  ← API only
   RedisTokenCache.cs              (5min sliding, ICacheStore behind ITokenCache)
   RedisSessionRevocationStore.cs  (logout = cluster-wide invalidation)
@@ -141,8 +141,8 @@ Migrations/                       (5 migrations, see data.md)
 | Project | Tests | Tool |
 |---|---:|---|
 | `Hookbin.UnitTests` | 377 | xUnit + NSubstitute + FluentAssertions |
-| `Hookbin.IntegrationTests` | 85 | xUnit + WebAppFactory + Testcontainers (MSSQL + Redis) |
+| `Hookbin.IntegrationTests` | 89 | xUnit + WebAppFactory + Testcontainers (MSSQL + Redis) |
 | `Hookbin.ArchitectureTests` | 47 | ArchUnitNET + NetArchTest |
-| `Hookbin.E2ETests` | 64 | xUnit + Playwright + shared `DashboardE2EFixture` |
+| `Hookbin.E2ETests` | 66 | xUnit + Playwright + shared `DashboardE2EFixture` |
 
 Audit coverage / mutation scores: `docs/AUDIT/BASELINE.md`.

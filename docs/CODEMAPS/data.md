@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-13 | Files scanned: 6 migrations + 2 EF configurations | Token estimate: ~750 -->
+<!-- Generated: 2026-05-14 | Files scanned: 6 migrations + 2 EF configurations | Token estimate: ~800 -->
 
 # Data
 
@@ -70,6 +70,10 @@ ResponseStatusCode INT            null
 - `Persistence/Configurations/WebhookRequestConfiguration.cs`
   - `(TokenId, ReceivedAt DESC, Id DESC)` covering index — drives paginated reads
   - `Headers` stored as JSON string (`NVARCHAR(MAX)`)
+  - `OnDelete(DeleteBehavior.Cascade)` on `TokenId` FK — `DeleteTokenCommand` (hard-delete) sweeps all child `WebhookRequest` rows in one transaction so the dashboard tile queries never see orphans
+
+## Hard-Delete Race Handling
+- Hard-delete on the API can land between an in-flight `XADD` and the StreamWorker `AddAsync`. The resulting `SqlException.Number == 547` (FK violation) is treated as terminal by `RedisStreamConsumerService.ProcessEntryAsync`: ACK + drop with a warning log. Retry would never succeed (the parent row is gone), and leaving the entry in the PEL would block every subsequent webhook for the worker's process lifetime.
 
 ## Read Path
 - Both repositories use `.AsNoTracking()` on every SELECT — enforced by `ZeroTrustInvariantsTests.WebhookTokenRepository_ReadMethods_AllUse_AsNoTracking`

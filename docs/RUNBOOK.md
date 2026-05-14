@@ -1,7 +1,7 @@
 # Operations Runbook
 
 <!-- AUTO-GENERATED:HEADER START -->
-**Last Updated:** 2026-05-13 (sourced from `docker-compose.yml` + `.env.example`; updated test counts; added Stryker mutation gate; CSRF + custom modal mention; jobs-worker single-replica callout)
+**Last Updated:** 2026-05-14 (re-verified against `docker-compose.yml` — 7/7 services in sync; no deploy-procedure changes since 2026-05-13; mutation baseline date unchanged — Stryker not re-run this cycle)
 <!-- AUTO-GENERATED:HEADER END -->
 
 This guide covers deployment, health monitoring, troubleshooting, and operational procedures for the Hookbin stack.

@@ -1,133 +1,111 @@
-Hookbin Codemap Update — 2026-05-13
+Hookbin Codemap Update — 2026-05-14
 =====================================
 
-Previous codemap date:  2026-05-11 (architecture-tests + domain-encapsulation pass)
-This regeneration:      2026-05-13 (post zero-trust audit + UI redesign + README hero)
-Drift class:            HIGH (~40% across 5 codemaps) — but bounded to known scope
+Previous codemap date:  2026-05-13 (zero-trust audit + UI redesign + README hero)
+This regeneration:      2026-05-14 (hard-delete on DeleteToken + StreamWorker FK handling)
+Drift class:            LOW (<10% across 4 codemaps; in-place edits)
 
 Files scanned this run
 ----------------------
   Backend source (src/):                59 .cs files
-  Test source (tests/):                 50 .cs files
-  Frontend source (frontend/src/app/):  61 TS/HTML/SCSS files (30 spec files)
-  Migrations (Infrastructure/):          6 EF Core migrations
+  Test source (tests/):                 52 .cs files (+2 new — DashboardMetricsApiTests, DashboardMetricsLifecycleE2ETests)
+  Frontend source (frontend/src/app/):  61 TS/HTML/SCSS files (30 spec files, unchanged)
+  Migrations (Infrastructure/):          6 EF Core migrations (unchanged)
   Csproj / package.json:                 8 + 1
 
 Codemap files updated
 ---------------------
-  docs/CODEMAPS/INDEX.md          (refreshed header + stack summary)
-  docs/CODEMAPS/architecture.md   (regenerated)
-  docs/CODEMAPS/backend.md        (regenerated)
-  docs/CODEMAPS/frontend.md       (regenerated)
-  docs/CODEMAPS/data.md           (regenerated)
-  docs/CODEMAPS/dependencies.md   (regenerated)
+  docs/CODEMAPS/INDEX.md          (+1 new "Recent Changes (2026-05-14)" section, header refresh)
+  docs/CODEMAPS/architecture.md   (Webhook Receive Flow updated; new Token Lifecycle table; StreamWorker FK note; test counts; header refresh)
+  docs/CODEMAPS/backend.md        (DeleteToken row updated; RedisStreamConsumerService note; test counts; header refresh)
+  docs/CODEMAPS/data.md           (WebhookRequestConfiguration cascade note; new Hard-Delete Race Handling section; header refresh)
+  docs/CODEMAPS/frontend.md       (UNCHANGED — no Angular-side changes since 2026-05-13)
+  docs/CODEMAPS/dependencies.md   (UNCHANGED — no package version changes)
   docs/CODEMAPS/CHANGES_2026_05_06.md  (untouched — historical pin)
 
-Significant changes detected since prior codemap (2026-05-11)
+Significant changes detected since prior codemap (2026-05-13)
 -------------------------------------------------------------
 
-[ARCHITECTURE]
-  + Zero-trust audit landed (docs/AUDIT/BASELINE.md + REMEDIATION.md)
-  + Stryker.NET 4.14.1 mutation testing introduced
-      Domain         86.36%
-      Application    90.38%
-      Infrastructure 52.66% (integration-tested, documented)
-      API            73.38%
-  + New architecture test classes (16 tests added):
-      Conventions/ZeroTrustInvariantsTests.cs    (12 tests, DANGER ZONE structural guards)
-      Conventions/OperationalSnapshotTests.cs    (4 tests, docker-compose + nginx + csproj)
-  + Total architecture tests:  31 → 47
+[BACKEND — DeleteTokenCommandHandler]
+  ! Changed: token.Deactivate() -> repository.DeleteAsync(token.Id)
+      Hard-delete via EF Core; WebhookRequest rows cascaded by
+      WebhookRequestConfiguration.cs:40 (OnDelete(DeleteBehavior.Cascade))
+  + Added: IWebhookTokenRepository.DeleteAsync(Guid, CancellationToken)
+  ! Receiver semantic shift: deleted tokens now return 404 (was 410)
+      Deactivated tokens (isActive=false via UpdateToken) still return 410
+      and still persist requests for audit — only path that exercises the
+      audit-persistence invariant now.
 
-[BACKEND]
-  + New CQRS handler:
-      Application/Requests/Commands/SetRequestNote/   (command + validator + handler)
-      Wired to PATCH /api/tokens/{tokenId}/requests/{id}/note
-  + Domain serialization fixes:
-      WebhookRequest.cs — [JsonInclude] added to ProcessingTimeMs (private-set)
-  + New unit tests:
-      Domain/WebhookRequestSerializationTests.cs
-      Domain/CustomResponseSerializationTests.cs
-      Application/TokenDtoSerializationTests.cs
-  + UpdateTokenCommandHandler now uses GetByIdIncludingInactiveAsync
-      (previously could not reactivate inactive tokens — caught by MCP audit)
+[INFRASTRUCTURE — RedisStreamConsumerService]
+  + Added catch (DbUpdateException ex) when (IsForeignKeyViolation(ex))
+      -> ACK + drop with logger.LogWarning
+  + Added static helper: IsForeignKeyViolation(DbUpdateException)
+      -> ex.InnerException is SqlException sql && sql.Number == 547
+  Rationale: hard-delete + async stream pipeline can race. Without this
+  handler, FK violations poison the PEL forever and block every subsequent
+  webhook for the worker's process lifetime.
 
-[DATA]
-  + New migration: 20260511160402_AddTokenNameAndRequestResponseAndCountry
-      Adds: WebhookToken.Name (NVARCHAR 80)
-      Adds: WebhookRequest.ResponseStatusCode (INT, nullable)
-      Adds: WebhookRequest.IpCountry (NVARCHAR 2, nullable)
-  + Total EF migrations: 5 → 6
+[TESTS — new]
+  + tests/Hookbin.IntegrationTests/DashboardMetricsApiTests.cs (4 tests)
+  + tests/Hookbin.E2ETests/DashboardMetricsLifecycleE2ETests.cs (2 tests)
+  + docs/migrations/2026-05-13-cleanup-soft-deleted-tokens.sql
+      (idempotent one-shot for pre-existing orphan WebhookRequest rows from
+       the soft-delete era; not an EF migration)
+
+[TESTS — modified]
+  ~ WebhookReceiverTests.cs                  410->404 + deactivate-path rewrite
+  ~ WebhookReceiverContentTypeTests.cs       deactivate-path rewrite
+  ~ TokenCacheInvalidationTests.cs           410->404 rename
+  ~ DashboardMetricsApiTests.cs              NotFound->OK+total=0 assertion
+  ~ TokenLifecycleE2ETests.cs                Gone->NotFound assertion
+  ~ DashboardMetricsLifecycleE2ETests.cs     WaitForRequestsAsync 10s->30s
+  ~ DashboardE2ETests.cs                     pre-navigation API poll added
+  ~ RedisSseBridgeServiceTests.cs            deflaked Task.Delay(50) -> TaskCompletionSource
 
 [FRONTEND]
-  + Angular Material fully removed; only @angular/cdk retained (Overlay)
-  + New shared infrastructure (replaces MatDialog / MatSnackBar):
-      src/app/shared/modal/             ModalService + ModalRef + MODAL_REF/MODAL_DATA tokens
-      src/app/shared/toast/             ToastService (DOM-injected .toast)
-      src/app/shared/confirm-dialog/    ConfirmDialogComponent
-  + New shared components:
-      src/app/shared/json-tree/         JsonTreeComponent (request body tree view)
-      src/app/shared/json-highlight/    jsonHighlight pipe (raw body coloring)
-      src/app/shared/sparkline/         SparklineComponent (24h activity)
-  + DANGER ZONE invariant tests added:
-      core/interceptors/http-error.interceptor.spec.ts
-      core/services/sse.service.spec.ts  (reconnect after onerror; no reconnect after unsubscribe)
-  + Total Angular tests: 200 → 209
-
-[INTEGRATION]
-  + AuthRateLimiterTests.cs  (3 tests — login fixed-window 5/min, webhook-receiver token-bucket)
-  + TokenCacheInvalidationTests.cs +5 N-shot tests (SetCustomResponse cache-hit safety, etc.)
-  + Total integration tests: 77 → 85
-
-[E2E]
-  + SequentialCacheStateE2ETests.cs  (2 tests — replays MCP cache-hit walkthrough)
-  + ReactivateE2ETests.cs            (1 test — Bug 2 silent-404 scenario)
-  + 17 selector-drift failures fixed (mat-dialog-container → .modal-panel;
-    .btn-danger → .modal-panel .btn-danger; .code-block → .hdr-code/.body-code;
-    mat-select/mat-snack removed)
-  + Test names made unique-per-run (Guid suffix) to fix strict-mode violations
-    on accumulated duplicates
-  + Full E2E suite passing:           47/64 → 64/64
+  ~ token-detail.component.ts (deleteRequest + clearAll now refresh dashboard metrics)
+  ~ dashboard.component.ts (calls getMetrics().subscribe() after delete confirm)
+  + data-testid attributes on the three dashboard stat tile values
 
 [DOCS]
-  + docs/assets/logo.svg          (new — 256x256 brand mark)
-  + README.md                     (added centered hero block: logo / wordmark /
-                                   tagline / 7 shields.io badges / quick-link nav)
-  + docs/AUDIT/BASELINE.md        (mutation-score baselines, 4 projects)
-  + docs/AUDIT/REMEDIATION.md     (phase-by-phase tracker)
+  ~ CLAUDE.md — added DANGER ZONE rows for hard-delete invariant and StreamWorker FK handling
+  ~ README.md — clarified soft-delete vs hard-delete contract
 
 [DEPENDENCIES]
-  + dotnet-stryker 4.14.1         (dev tool — not in any .csproj)
-  + Architecture test packages    TngTech.ArchUnitNET 0.13.3, NetArchTest.eNhancedEdition 1.4.5
-  - @angular/material             REMOVED (custom modal/toast now use only @angular/cdk Overlay)
-  - karma, jasmine-core, @types/jasmine, @angular-devkit/build-angular  REMOVED
-    (Vitest 4 takes over)
+  No package version changes.
 
 Test count drift
 ----------------
-                  Pre (2026-05-11)    Post (2026-05-13)    Δ
-  Unit              310                 377                  +67
-  Architecture       26                  47                  +21
-  Integration        59                  85                  +26
-  E2E (Playwright)   48                  64                  +16
-  Frontend (Vitest) 118                 209                  +91
+                  Pre (2026-05-13)    Post (2026-05-14)    Δ
+  Unit              377                 377                  0
+  Architecture       47                  47                  0
+  Integration        85                  89                 +4
+  E2E (Playwright)   64                  66                 +2
+  Frontend (Vitest) 209                 209                  0
   ------------------------------------------------------------
-  Total             561                 782                 +221
+  Total             782                 788                 +6
 
 Staleness warnings
 ------------------
-  None. All five codemaps last touched 2026-05-12 (≤2 days ago); regeneration cadence healthy.
+  None. Codemaps regenerated 2026-05-14; prior date 2026-05-13 (<48h ago).
 
 Token estimates per codemap (after regen)
 -----------------------------------------
-  architecture.md   ~900 tokens
-  backend.md        ~950 tokens
-  frontend.md       ~900 tokens
-  data.md           ~750 tokens
-  dependencies.md   ~850 tokens
+  architecture.md   ~960 tokens (+60 — added Token Lifecycle table)
+  backend.md        ~950 tokens (unchanged)
+  frontend.md       ~900 tokens (unchanged)
+  data.md           ~800 tokens (+50 — added Hard-Delete Race Handling section)
+  dependencies.md   ~850 tokens (unchanged)
   All within the <1000-token target for efficient AI context loading.
 
 Diff approval
 -------------
   /ecc:update-codemaps invoked by user — explicit authorization to regenerate.
-  All five files overwritten in place; no destructive removal of historical notes
-  (CHANGES_2026_05_06.md retained as immutable history pin).
+  Drift well under 30% threshold; in-place edits per skill rules.
+  No destructive removal of historical notes (CHANGES_2026_05_06.md retained).
+
+CI green confirmation
+---------------------
+  Run 25829442444 (sha e9d6520) — all 5 jobs green:
+    Build & Unit Tests, Architecture Tests, Frontend Build, Integration Tests, E2E Tests
+  This codemap regeneration corresponds to that green state.

@@ -1,6 +1,6 @@
 # Hookbin — Codemaps Index
 
-**Last Updated:** 2026-05-13 (zero-trust audit landed; Stryker.NET mutation baselines; Angular Material → custom modal/toast/CDK Overlay; ZeroTrustInvariantsTests + OperationalSnapshotTests; SetRequestNote CQRS handler; 6th migration `AddTokenNameAndRequestResponseAndCountry`; logo asset + README hero)
+**Last Updated:** 2026-05-14 (hard-delete on `DeleteTokenCommand` + EF cascade; StreamWorker drops FK-violation entries instead of poisoning PEL; new `DashboardMetricsApiTests` (×4) + `DashboardMetricsLifecycleE2ETests` (×2); deflaked `RedisSseBridgeServiceTests` startup wait)
 
 ---
 
@@ -45,6 +45,31 @@ Hookbin is a self-hosted webhook debugging platform built with:
 1. Read **architecture.md** for deployment units
 2. Read **data.md** for critical data flows
 3. See **dependencies.md** for all external services
+
+---
+
+## Recent Changes (as of 2026-05-14 — Hard-Delete + StreamWorker FK Handling)
+
+### Hard-Delete on Token Removal (commit `5b693a3`)
+- **`DeleteTokenCommandHandler`** — changed from `token.Deactivate()` (soft-delete) to `repository.DeleteAsync(token.Id)` (hard-delete). EF Core cascade (`WebhookRequestConfiguration.cs:40`, `OnDelete(DeleteBehavior.Cascade)`) removes all child `WebhookRequest` rows in the same transaction.
+- **`IWebhookTokenRepository.DeleteAsync(Guid, CancellationToken)`** — new interface method; impl uses `FindAsync` + `Remove` + `SaveChangesAsync`.
+- **Receiver semantic shift**: deleted tokens now return `404 Not Found` (was `410 Gone`). Deactivated tokens (`isActive=false` via `UpdateToken`) still return `410 Gone` and still persist requests for audit — this is the only path that exercises the audit-persistence invariant.
+- **Dashboard contract restored**: stat tiles (`TOTAL ENDPOINTS`, `REQUESTS CAPTURED`, `LIVE ENDPOINTS`) now drop correctly after a delete. Pre-fix, the request-derived metrics counted `WebhookRequest` rows without joining on `IsActive`, leaving permanent ghost counts for any soft-deleted token.
+
+### StreamWorker FK-Violation Handling (commit `e2bfee9`)
+- **`RedisStreamConsumerService.ProcessEntryAsync`** — new catch on `DbUpdateException` where `InnerException is SqlException { Number: 547 }`. Treats FK violations as **terminal**: ACK + drop with a warning log.
+- **Why**: hard-delete + async stream pipeline can race. A webhook POST publishes to Redis, then the token is deleted (cascade nukes existing rows), then the StreamWorker tries to INSERT a new `WebhookRequest` pointing at the now-gone token → SQL error 547. Without the catch, the entry stayed unACKed in the PEL forever, blocking every subsequent webhook for the worker's process lifetime.
+- **Pre-fix CI symptom**: `StreamWorkerE2ETests.PostedWebhook_PersistsToDatabase_ViaStreamWorker` and 23 downstream E2E tests cascade-failed in CI run `25827159760`.
+
+### Test Suite Updates
+- **New: `tests/Hookbin.IntegrationTests/DashboardMetricsApiTests.cs`** — 4 tests covering the full delete-and-recount lifecycle through the metrics API.
+- **New: `tests/Hookbin.E2ETests/DashboardMetricsLifecycleE2ETests.cs`** — 2 Playwright regression tests over the dashboard tile drop after delete.
+- **Deflaked: `RedisSseBridgeServiceTests`** — replaced fixed `Task.Delay(50)` in startup helpers with `TaskCompletionSource` signalled from the captured `SubscribeAsync` callback (5 s timeout cap). Eliminates the CI flake on slow runners.
+- **Updated counts**: integration 85 → 89; E2E 64 → 66; unit unchanged at 377; architecture unchanged at 47.
+
+### DANGER ZONE Additions
+- `DeleteTokenCommandHandler` must hard-delete (not soft-delete) — see CLAUDE.md DANGER ZONE row.
+- StreamWorker must ACK + drop on `SqlException.Number == 547`. The retry-via-PEL pattern is correct for transient faults but **wrong** for FK violations that originate from hard-delete cascades.
 
 ---
 

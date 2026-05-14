@@ -1,7 +1,7 @@
 # Contributing Guide
 
 <!-- AUTO-GENERATED:HEADER START -->
-**Last Updated:** 2026-05-13 (zero-trust audit + mutation testing baselines; UI moved from Angular Material → custom CDK Overlay modal; test count 782; E2E selector hardening; CSRF X-XSRF-TOKEN guidance added)
+**Last Updated:** 2026-05-14 (test counts refreshed: integration 85→89, E2E 64→66, total 788; hard-delete on `DeleteTokenCommand` (EF cascade) and StreamWorker FK-violation ACK + drop landed since prior generation — see `docs/CODEMAPS/INDEX.md`)
 <!-- AUTO-GENERATED:HEADER END -->
 
 This guide explains how to set up the development environment, run tests, and submit pull requests to the Hookbin project.
@@ -134,7 +134,7 @@ Fast feedback loop — domain logic, CQRS handlers, in-memory services. ~377 tes
 dotnet test tests/Hookbin.IntegrationTests/
 ```
 
-Testcontainers pulls SQL Server 2022 and Redis 7 containers automatically. Ensure Docker is running. ~85 tests, takes ~90 seconds.
+Testcontainers pulls SQL Server 2022 and Redis 7 containers automatically. Ensure Docker is running. ~89 tests, takes ~90 seconds.
 
 ### Run Mutation Tests (optional, deeper feedback)
 
@@ -271,13 +271,13 @@ The project uses a **5-tier test pyramid**:
 <!-- AUTO-GENERATED:TEST-COUNTS START -->
 1. **Architecture Tests** (47 rules) — Assembly reflection + file content snapshots; no infrastructure; fastest (~1s)
 2. **Unit Tests** (377 backend + 209 frontend) — Fast, isolated, no infrastructure (~15s combined)
-3. **Integration Tests** (85 backend) — Real SQL Server + Redis containers via Testcontainers; WebApplicationFactory (~90s)
-4. **E2E Tests** (64 via Playwright) — Full stack running; user workflows end-to-end (~30s with shared fixture)
+3. **Integration Tests** (89 backend) — Real SQL Server + Redis containers via Testcontainers; WebApplicationFactory (~90s)
+4. **E2E Tests** (66 via Playwright) — Full stack running; user workflows end-to-end (~60s with shared fixture)
 5. **Mutation Tests** (optional, Stryker.NET) — Falsifiable pin verification; gate ≥60% on Domain + Application
 
 All non-mutation tests must pass before submitting a PR. Mutation tests are advisory but recommended when changing CQRS handler logic, domain invariants, or serialization contracts.
 
-**Total tests: 782 (architecture + unit + integration + E2E + frontend), all green at 2026-05-13.**
+**Total tests: 788 (architecture + unit + integration + E2E + frontend), all green at 2026-05-14 (CI run 25829442444).**
 <!-- AUTO-GENERATED:TEST-COUNTS END -->
 
 ### Architecture Tests (Fastest — 1 second)

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-13 | Files scanned: 170 (59 backend src + 50 tests + 61 frontend) | Token estimate: ~900 -->
+<!-- Generated: 2026-05-14 | Files scanned: 170 (59 backend src + 50 tests + 61 frontend) | Token estimate: ~960 -->
 
 # Architecture
 
@@ -92,11 +92,20 @@ POST /webhook/{guid} (AllowAnonymous, rate-limited, [JsonInclude]-safe cache)
   → read body (IOException → BadHttpRequestException → 400)
   → IRequestQueuePublisher.PublishAsync → XADD webhook-requests
   ├── Active   → return CustomResponse or 200
-  └── Inactive → return 410 Gone (request still persisted for audit)
+  ├── Inactive (isActive=false)        → return 410 Gone (request still persisted for audit)
+  └── Deleted  (row hard-deleted)      → return 404 Not Found (no row, no persistence)
 
 StreamWorker: XREADGROUP → IWebhookRequestRepository.AddAsync → XACK → PUBLISH sse:{tokenId}
+  └── On SqlException.Number==547 (FK violation, hard-delete race) → ACK and drop
 API: SUBSCRIBE sse:* → SseNotifier.NotifyAsync → Channel<SseEvent> → "event: request"
 ```
+
+## Token Lifecycle (hard-delete vs deactivate)
+| Path | Trigger | Token row | WebhookRequests | Receiver response |
+|---|---|---|---|---|
+| Hard-delete | `DELETE /api/tokens/{id}` → `DeleteTokenCommand` | removed | cascaded via EF Core `OnDelete(Cascade)` | `404 Not Found` |
+| Deactivate | `PUT /api/tokens/{id}` with `isActive=false` → `UpdateTokenCommand` | kept (`IsActive=false`) | preserved + new requests still persisted | `410 Gone` |
+| Reactivate | `PUT /api/tokens/{id}` with `isActive=true` | row remains, `IsActive=true` | retained | normal `200`/`CustomResponse` |
 
 ## Rate Limiting & Security
 | Boundary | Policy | Source |
@@ -117,15 +126,15 @@ API: SUBSCRIBE sse:* → SseNotifier.NotifyAsync → Channel<SseEvent> → "even
 - Stable consumer name across restarts: `HOOKBIN_WORKER_ID`
 - PEL recovery on cold start: `XREADGROUP "0-0"` drains unACKed messages
 
-## Test Coverage (2026-05-13)
+## Test Coverage (2026-05-14)
 | Layer | Tests | Mutation Score |
 |---|---:|---:|
 | Unit | 377 | Domain 86.4% / Application 90.4% (Stryker.NET 4.14.1) |
 | Architecture | 47 | n/a (structural) |
-| Integration | 85 | n/a (covers Infrastructure paths) |
-| E2E (Playwright) | 64 | n/a |
+| Integration | 89 | n/a (covers Infrastructure paths) — +4 `DashboardMetricsApiTests` |
+| E2E (Playwright) | 66 | n/a — +2 `DashboardMetricsLifecycleE2ETests` |
 | Frontend (Vitest) | 209 | n/a |
-| **Total** | **782** | API 73.4% / Infrastructure 52.7% (integration-tested) |
+| **Total** | **788** | API 73.4% / Infrastructure 52.7% (integration-tested) |
 
 Audit artifacts: `docs/AUDIT/BASELINE.md`, `docs/AUDIT/REMEDIATION.md`.
 

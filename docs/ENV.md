@@ -1,7 +1,7 @@
 # Environment Variables Reference
 
 <!-- AUTO-GENERATED:HEADER START -->
-**Last Updated:** 2026-05-13 (sourced from `.env.example`; added BCrypt `$$`-escape requirement; clarified `WEBHOOK__ReceiverRateLimitPerSecond`; noted `HOOKBIN_WORKER_ID` PEL-recovery role)
+**Last Updated:** 2026-05-14 (re-verified against `.env.example` — no variable drift; 10/10 vars in sync; no new env vars introduced by hard-delete or StreamWorker FK fixes)
 <!-- AUTO-GENERATED:HEADER END -->
 
 This document describes all environment variables used by the Hookbin stack. Copy `.env.example` to `.env` and configure before deployment.
