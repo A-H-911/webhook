@@ -2,7 +2,8 @@
 #
 # Required in .env:
 #   NGROK_AUTHTOKEN=<your_token>
-#   HOOKBIN_BASE_URL=https://twk-webhook-unifonic.ngrok.app
+#   NGROK_DOMAIN=twk-webhook-unifonic.ngrok.app
+#   HOOKBIN_BASE_URL=https://${NGROK_DOMAIN}
 #
 # HOOKBIN_BASE_URL is set in .env and flows to the api service through the existing
 # Hookbin__BaseUrl binding in docker-compose.yml — no override is needed in this file.
@@ -12,7 +13,7 @@ services:
     image: ngrok/ngrok:latest
     command: >
       http
-      --domain=twk-webhook-unifonic.ngrok.app
+      --domain=${NGROK_DOMAIN}
       frontend:80
     environment:
       NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN}"
